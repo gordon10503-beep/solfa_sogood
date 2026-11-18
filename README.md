@@ -1,6 +1,6 @@
-# Solfa Studio
+# solfa_sogood
 
-A local, browser-based music workspace for reading, checking, composing and rehearsing scores. Solfa Studio combines editable MusicXML notation with the original imported PDF, so lyrics and markings remain visible while you review recognition.
+solfa_sogood is a local, browser-based music workspace for reading, checking, composing and rehearsing scores. Solfa Studio combines editable MusicXML notation with the original imported PDF, so lyrics and markings remain visible while you review recognition.
 
 ## Get started
 

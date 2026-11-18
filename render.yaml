@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: solfa-studio
+    name: solfa-sogood
     runtime: docker
     region: singapore
     plan: free

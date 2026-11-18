@@ -20,7 +20,7 @@ function run(fn) { return async (...args) => { try { await fn(...args); } catch(
 function on(id, event, fn) { $(id).addEventListener(event,run(fn)); }
 async function library() {
   const result = await api("/api/library"); state.library=result.scores; state.scanner=result.scanner;
-  if(result.storage==="Neon"){document.querySelector(".sidebar-bottom strong").textContent="Shared workspace";document.querySelector(".sidebar-bottom small").textContent="Score library saved in Neon";document.querySelector(".workspace-label .local-dot").title="Hosted library";document.title="Solfa Studio · Shared music workspace";}
+  if(result.storage==="Neon"){document.querySelector(".sidebar-bottom strong").textContent="Shared workspace";document.querySelector(".sidebar-bottom small").textContent="Score library saved in Neon";document.querySelector(".workspace-label .local-dot").title="Hosted library";document.title="solfa_sogood · Shared music workspace";}
   syncScanJobs(result.scanJobs||[]);
   $("score-count").textContent=state.library.filter(s=>!s.trashed).length;
   renderLibrary();
