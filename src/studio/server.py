@@ -215,6 +215,7 @@ class StudioServer(ThreadingHTTPServer):
 
     def __init__(self, address, library):
         super().__init__(address, Handler)
+        self.scan_lock = threading.Lock()
         self.public_host = None
         self.workspace_password = None
         self.library, self.token, self.jobs = library, secrets.token_urlsafe(32), {}
@@ -372,7 +373,7 @@ class Handler(BaseHTTPRequestHandler):
                 job = uuid.uuid4().hex
                 self.server.jobs[job] = {"status": "running", "stage": 0, "started": time.time(), "id": sid,
                                          "name": payload["name"], "message": "Preparing scan"}
-                threading.Thread(target=scan, args=(self.server, job, command, data, ext, sid, {"pages": pages, "layout": layout, "cueNotes": cue_mode, "language": language}), daemon=True).start()
+                threading.Thread(target=run_scan, args=(self.server, job, command, data, ext, sid, {"pages": pages, "layout": layout, "cueNotes": cue_mode, "language": language}), daemon=True).start()
                 return self.respond({"job": job, "id": sid})
             sid, revision = payload["id"], int(payload["revision"])
             row = lib.get(sid)
@@ -413,6 +414,14 @@ class Handler(BaseHTTPRequestHandler):
             self.respond({"id": sid, "revision": result["revision"], "meta": result["meta"]})
         except Exception as exc:
             self.respond({"error": str(exc) or "Could not save the score."}, status=400)
+
+
+def run_scan(server, job, *args):
+    if server.public_host:
+        with server.scan_lock:
+            scan(server, job, *args)
+    else:
+        scan(server, job, *args)
 
 
 def scan(server, job, command, data, ext, sid=None, options=None):
