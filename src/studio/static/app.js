@@ -80,6 +80,8 @@ async function openScore(id, preserve=false) {
   }
   state.speed=Number($("tempo").value)/result.baseTempo;
   $("score-title").textContent=result.title;$("score-eyebrow").textContent=result.meta.group || "UNGROUPED";
+  $("score-title").title=result.title;
+  $("score-eyebrow").hidden=!result.meta.group || result.meta.group==="Ungrouped";
   $("score-subtitle").textContent=[result.composer,`${result.parts.length} parts`,`${result.parts[0]?.measures.length||0} bars`,`${result.pages.length} ${result.pages.length===1?"page":"pages"}`].filter(Boolean).join("  ·  ");
   $("breadcrumb").textContent="Score reader";$("library-view").hidden=true;$("score-view").hidden=false;
   $("scan-banner").hidden=result.meta.reviewed || (result.meta.origin!=="Scan" && !result.issues.length);
@@ -581,7 +583,7 @@ document.addEventListener("keydown",run(async e=>{
 }));
 on("logout-btn","click",async()=>{await state.saving;await api("/api/logout",{});location.replace("/");});
 on("invite-btn","click",async()=>{const result=await api("/api/invite",{});const field=$("invite-url");field.hidden=false;field.value=location.origin+"/#invite="+result.invite;field.select();toast("Copy this one-use link for your friend. It expires in seven days.");});
-for(const [id,property] of [["title-height","--title-spacing"],["tool-height","--tool-spacing"]]){
+for(const [id,property] of [["title-size","--score-title-size"],["title-height","--title-spacing"],["tool-height","--tool-spacing"]]){
   const input=$(id);input.value=localStorage.getItem(id)??input.value;
   const apply=()=>document.documentElement.style.setProperty(property,input.value+"px");
   apply();input.oninput=()=>{apply();localStorage.setItem(id,input.value);};

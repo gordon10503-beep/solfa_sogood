@@ -71,7 +71,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 body:is([data-page=compose],[data-page=review]) #pages .note{touch-action:none;cursor:ns-resize}
 #drag-pitch{position:fixed;transform:translate(-50%,-145%);padding:5px 12px;background:#17213b;color:white;border-radius:8px;pointer-events:none;z-index:65}
 
-.score-heading{padding-block:var(--title-spacing,16px)}
+.score-heading{padding-block:var(--title-spacing,5px)}
 .workbar{padding-block:var(--tool-spacing,4px);min-height:0}
 .reading-panel label{display:grid;gap:3px}
 #edit-strip{display:flex;align-items:center;gap:5px;padding:5px 12px;background:white;border-bottom:1px solid var(--line);overflow-x:auto;flex-shrink:0}
@@ -104,5 +104,12 @@ body:is([data-page=compose],[data-page=review]) #pages .note{touch-action:none;c
   .keyboard-panel{max-height:40dvh;overflow:auto}.keyboard-panel .keyboard{max-width:none}
   dialog{width:min(96vw,540px);max-height:85dvh;overflow:auto}
 }
-@media(max-height:570px){.score-heading .eyebrow,.score-heading .muted{display:none}.score-heading{padding-block:2px}.topbar{min-height:32px;height:auto}.workspace{min-height:0}}
+@media(max-height:570px){.score-heading .eyebrow,.score-heading .muted{display:none}.score-heading{padding-block:var(--title-spacing,5px)}.topbar{min-height:32px;height:auto}.workspace{min-height:0}}
 @media print{#edit-strip,#mobile-nav,#account-panel{display:none!important}}
+
+@media screen {
+  .score-heading > div:first-child{min-width:0;flex:1 1 160px}
+  .score-heading #score-title{font-size:var(--score-title-size,18px);line-height:1.18;font-weight:650;letter-spacing:normal;margin:0;overflow-wrap:anywhere}
+  .score-heading #score-eyebrow,.score-heading #score-subtitle{margin:2px 0;line-height:1.2}
+  .score-heading #score-subtitle{font-size:12px}
+}
