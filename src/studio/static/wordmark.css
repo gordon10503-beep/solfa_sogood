@@ -1,0 +1,16 @@
+@font-face {
+  font-family: "Pinyon Script";
+  src: url("/fonts/pinyon/PinyonScript-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+.brand .brand-light,
+header .brand-light {
+  font-family: "Pinyon Script", cursive;
+  font-size: 1.22em;
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: 1;
+}

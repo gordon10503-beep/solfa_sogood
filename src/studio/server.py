@@ -335,8 +335,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond({"status": "ok"})
         if not self.allowed(): return self.respond({"error": "Local access only."}, status=403)
         path = urlparse(self.path)
-        if path.path in ("/login.js","/login.css"):
-            return self.respond((STATIC/path.path[1:]).read_bytes(),"text/javascript" if path.path.endswith(".js") else "text/css")
+        public_assets = {
+            "/login.js": "text/javascript", "/login.css": "text/css",
+            "/wordmark.css": "text/css", "/fonts/pinyon/PinyonScript-Regular.ttf": "font/ttf",
+        }
+        if path.path in public_assets:
+            file = STATIC / path.path[1:]
+            return self.respond(file.read_bytes(),public_assets[path.path],etag=f'"{file.stat().st_mtime_ns:x}"')
         if not self.authenticated(): return
         try:
             if path.path == "/api/library":

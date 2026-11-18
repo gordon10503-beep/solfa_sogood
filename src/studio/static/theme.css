@@ -70,7 +70,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 
 body:is([data-page=compose],[data-page=review]) #pages .note{touch-action:none;cursor:ns-resize}
 #drag-pitch{position:fixed;transform:translate(-50%,-145%);padding:5px 12px;background:#17213b;color:white;border-radius:8px;pointer-events:none;z-index:65}
-.brand .brand-light{font-family:"Segoe Script","Apple Chancery","Brush Script MT",cursive;font-weight:500}
+
 .score-heading{padding-block:var(--title-spacing,16px)}
 .workbar{padding-block:var(--tool-spacing,4px);min-height:0}
 .reading-panel label{display:grid;gap:3px}
