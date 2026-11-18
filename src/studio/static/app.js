@@ -585,8 +585,39 @@ on("logout-btn","click",async()=>{await state.saving;await api("/api/logout",{})
 on("invite-btn","click",async()=>{const result=await api("/api/invite",{});const field=$("invite-url");field.hidden=false;field.value=location.origin+"/#invite="+result.invite;field.select();toast("Copy this one-use link for your friend. It expires in seven days.");});
 for(const [id,property] of [["title-size","--score-title-size"],["title-height","--title-spacing"],["tool-height","--tool-spacing"]]){
   const input=$(id);input.value=localStorage.getItem(id)??input.value;
-  const apply=()=>document.documentElement.style.setProperty(property,input.value+"px");
+  const apply=()=>{
+    document.documentElement.style.setProperty(property,input.value+"px");
+    if(id==="title-height"){
+      const divider=$("title-divider");
+      divider.setAttribute("aria-valuemin",input.min);
+      divider.setAttribute("aria-valuemax",input.max);
+      divider.setAttribute("aria-valuenow",input.value);
+      divider.setAttribute("aria-valuetext",input.value+" pixels of title spacing");
+    }
+  };
   apply();input.oninput=()=>{apply();localStorage.setItem(id,input.value);};
+}
+{
+  const divider=$("title-divider"), spacing=$("title-height");
+  let drag=null;
+  function setSpacing(value){
+    spacing.value=String(Math.round(value));
+    spacing.dispatchEvent(new Event("input"));
+  }
+  divider.onpointerdown=event=>{
+    if(drag || event.button!==0 || !event.isPrimary)return;
+    drag={pointer:event.pointerId,startY:event.clientY,startSpacing:Number(spacing.value)};
+    divider.setPointerCapture(event.pointerId);
+  };
+  divider.onpointermove=event=>{
+    if(drag?.pointer===event.pointerId)setSpacing(drag.startSpacing+(event.clientY-drag.startY)/2);
+  };
+  divider.onlostpointercapture=()=>{drag=null;};
+  divider.onkeydown=event=>{
+    const step=event.shiftKey?5:1, current=Number(spacing.value);
+    const values={ArrowUp:current-step,ArrowDown:current+step,Home:Number(spacing.min),End:Number(spacing.max)};
+    if(Object.hasOwn(values,event.key)){event.preventDefault();setSpacing(values[event.key]);}
+  };
 }
 on("xml-btn","click",async()=>{const r=await fetch(`/api/xml/${state.score.id}`);$("xml-editor").value=await r.text();$("xml-dialog").showModal();});
 on("xml-save","click",async()=>{await edit("xml",undefined,{xml:$("xml-editor").value});$("xml-dialog").close();});

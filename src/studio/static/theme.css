@@ -113,3 +113,9 @@ body:is([data-page=compose],[data-page=review]) #pages .note{touch-action:none;c
   .score-heading #score-eyebrow,.score-heading #score-subtitle{margin:2px 0;line-height:1.2}
   .score-heading #score-subtitle{font-size:12px}
 }
+
+#title-divider{position:relative;flex:0 0 8px;height:8px;cursor:row-resize;touch-action:none;user-select:none;background:transparent}
+#title-divider::after{content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:44px;height:3px;border-radius:2px;background:#98a4b8}
+#title-divider:is(:hover,:focus-visible,:active)::after{background:#3666bf}
+@media(pointer:coarse){#title-divider{height:16px;flex-basis:16px}}
+@media print{#title-divider{display:none}}
