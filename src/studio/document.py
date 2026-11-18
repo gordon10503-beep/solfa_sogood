@@ -97,6 +97,7 @@ def inspect(root, mode="movable", minor_do=False):
             issues.append({"part": pi, "measure": 0, "code": "missing-meter", "message": "Opening time signature was not recognized. The app currently assumes 4/4. Check the printed meter before correcting bar lengths."})
         divisions, beats, beat_type, key = 1., 4, 4, KeySignature(0)
         transpositions = {"1": 0}
+        clefs = {"1": ("G", 2, 0)}
         measures = []
         meter_known = False
         for mi, measure in enumerate(part.findall("measure")):
@@ -117,6 +118,9 @@ def inspect(root, mode="movable", minor_do=False):
                         raise ValueError("Time signature must be positive.")
                     if el.find("key/fifths") is not None:
                         key = KeySignature(int(el.findtext("key/fifths")), el.findtext("key/mode", "major"))
+                    for clef in el.findall("clef"):
+                        sign = clef.findtext("sign","G")
+                        clefs[clef.get("number","1")] = (sign,int(clef.findtext("line", {"G":"2","F":"4","C":"3"}.get(sign,"2"))),int(clef.findtext("clef-octave-change","0")))
                     for tr in el.findall("transpose"):
                         transpositions[tr.get("number", "1")] = float(tr.findtext("chromatic", "0")) + 12 * int(tr.findtext("octave-change", "0"))
                 elif el.tag in ("direction", "sound"):
@@ -169,6 +173,7 @@ def inspect(root, mode="movable", minor_do=False):
                                   "rest": el.find("rest") is not None, "pitched": pitch is not None,
                                   "duration": dur, "offset": start, "voice": voice,
                                   "staff": el.findtext("staff", "1"), "solfa": solfa,
+                                  "clef":clefs.get(el.findtext("staff","1"),("G",2,0)),
                                   "lyric": el.findtext("lyric/text", ""), "grace": grace,
                                   "tieStart": el.find("tie[@type='start']") is not None or el.find("notations/tied[@type='start']") is not None,
                                   "tieStop": el.find("tie[@type='stop']") is not None or el.find("notations/tied[@type='stop']") is not None,
@@ -255,7 +260,7 @@ def prepare_render_structure(root, info):
         info["issues"].append({"code": "broken-endings", "message": "Recognition produced incomplete or overlapping repeat endings. Their brackets are hidden in the display to keep opening bars visible. Saved notation is unchanged; repeat playback still needs review."})
 
 
-def engrave(data, mode="movable", minor_do=False, solfa=True):
+def engrave(data, mode="movable", minor_do=False, solfa=True, paper=None):
     import verovio
     root = read_xml(data)
     info = inspect(root, mode, minor_do)
@@ -293,8 +298,10 @@ def engrave(data, mode="movable", minor_do=False, solfa=True):
     with RENDER_LOCK:
         verovio.setDefaultResourcePath(str(Path(verovio.__file__).parent / "data"))
         tk = verovio.toolkit()
-        tk.setOptions({"pageWidth": 2100, "pageHeight": 2600, "scale": 45,
-                       "adjustPageHeight": True, "breaks": "auto", "footer": "none",
+        width, height = (max(100, min(6000,round(n*254/72))) for n in paper) if paper else (2100,2600)
+        encoded = paper and root.find(".//print[@new-page='yes']") is not None
+        tk.setOptions({"pageWidth": width, "pageHeight": height, "scale": 45,
+                       "adjustPageHeight": not paper, "breaks": "encoded" if encoded else "auto", "footer": "none",
                        "header": "none", "spacingStaff": 16, "spacingSystem": 12})
         if not tk.loadData(xml_bytes(root).decode()):
             raise ValueError("The engraving engine could not read this score. Check MusicXML notation.")
@@ -431,6 +438,67 @@ def insert_after_note(data, nid, step, alter, octave, unit):
     if notes[anchor["index"]].find("staff") is not None:
         child(new, "staff", anchor["staff"])
     bar.insert(list(bar).index(notes[anchor["index"]]) + 1, new)
+    return xml_bytes(root)
+
+
+def place_note(data, nid, unit, step, octave, offset=0, rest=False):
+    """Replace a targeted rhythm, splitting a rest for beat-specific entry."""
+    root = read_xml(data)
+    info = inspect(root)
+    target = info["notes"].get(nid)
+    if not target or unit not in DURATIONS or step not in tuple("CDEFGAB") or not 0 <= octave <= 8:
+        raise ValueError("Choose a note or rest on a five-line staff.")
+    part, measure = target["part"],target["measure"]
+    bar = root.findall("part")[part].findall("measure")[measure]
+    notes = bar.findall("note")
+    index = target["index"]
+    old = notes[index]
+    if (not (target["pitched"] or target["rest"]) or any(old.find(tag) is not None for tag in
+        ("chord","tie","grace","notations/tied","time-modification","beam","cue"))
+        or (index+1<len(notes) and notes[index+1].find("chord") is not None)):
+        raise ValueError("This note belongs to linked notation. Select an unlinked note or rest.")
+    length = DURATIONS[unit]
+    if target["duration"] <= 0:
+        raise ValueError("This anchor has no recognized duration. Choose another note or rest.")
+    if not target["rest"]: offset=0
+    if not 0 <= offset or offset+length > target["duration"]+1e-6:
+        raise ValueError("Choose a length that fits this note or rest. For missing beats use Insert after on piano.")
+    divisions = float(old.findtext("duration")) / target["duration"]
+    if any(abs(n*divisions-round(n*divisions))>1e-6 for n in (offset,length)):
+        raise ValueError("This length exceeds the score’s timing resolution.")
+    def silence(duration):
+        result=[]
+        while duration > 1e-6:
+            unit_name=next((k for k,v in DURATIONS.items() if v<=duration+1e-6),None)
+            if unit_name is None: raise ValueError("Choose a straight subdivision for this rest.")
+            beats=DURATIONS[unit_name]
+            el=ET.Element("note");child(el,"rest");child(el,"duration",round(beats*divisions))
+            child(el,"voice",target["voice"]);child(el,"type",unit_name)
+            if old.find("staff") is not None: child(el,"staff",target["staff"])
+            result.append(el);duration-=beats
+        return result
+    prefix=silence(offset)
+    suffix=silence(max(0,target["duration"]-offset-length))
+    position=list(bar).index(old)
+    if rest and old.find("lyric") is not None:
+        raise ValueError("This note carries lyrics. Clear its lyric before replacing it with a rest.")
+    for tag in ("rest","pitch","dot","accidental"):
+        for el in old.findall(tag): old.remove(el)
+    head=ET.Element("rest" if rest else "pitch");old.insert(0,head)
+    if not rest:
+        child(head,"step",step)
+        fifths=info["parts"][part]["measures"][measure]["fifths"]
+        if fifths and step in ("FCGDAEB" if fifths>0 else "BEADGCF")[:abs(fifths)]:
+            child(head,"alter",1 if fifths>0 else -1)
+        child(head,"octave",octave)
+    old.find("duration").text=str(round(length*divisions))
+    typ=old.find("type")
+    if typ is None:
+        typ=ET.Element("type")
+        old.insert(next((i for i,el in enumerate(old) if el.tag in ("stem","notehead","staff","notations","lyric")),len(old)),typ)
+    typ.text=unit
+    bar.remove(old)
+    for i,el in enumerate([*prefix,old,*suffix]):bar.insert(position+i,el)
     return xml_bytes(root)
 
 

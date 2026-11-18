@@ -1,11 +1,11 @@
 /* PDF spreads with lazy rendering and page-normalized annotation history. */
 window.StudioPDF = (() => {
   const $=id=>document.getElementById(id),redoByPage=new Map();
-  let pdf=null,page=1,scoreId=null,marks=[],save=null,tool='pan',stroke=null,observer=null,slots=[],generation=0,comparison=false,savedDirection='vertical';
+  let pdf=null,page=1,scoreId=null,marks=[],save=null,tool='pan',stroke=null,observer=null,slots=[],generation=0,comparison=false,savedDirection='vertical',selectedPages=[],request=0;
   function controls(){
     $('pdf-undo').disabled=!!stroke||!marks.some(m=>m.page===page);
     $('pdf-redo').disabled=!!stroke||!redoByPage.get(page)?.length;
-    $('pdf-prev').disabled=page===1;$('pdf-next').disabled=!pdf||page===pdf.numPages;
+    $('pdf-prev').disabled=page===(comparison&&selectedPages.length?selectedPages[0]:1);$('pdf-next').disabled=!pdf||page===(comparison&&selectedPages.length?selectedPages.at(-1):pdf.numPages);
     $('pdf-page-label').textContent=pdf?`${page} / ${pdf.numPages}`:'';
   }
   function draw(slot){
@@ -40,11 +40,12 @@ window.StudioPDF = (() => {
   }
   function arrange(){
     observer?.disconnect();
-    const host=$('pdf-pages'),width=+$('pdf-layout').value||1,horizontal=!comparison&&$('pdf-direction').value==='horizontal';
+    const host=$('pdf-pages'),width=comparison?1:(+$('pdf-layout').value||1),horizontal=!comparison&&$('pdf-direction').value==='horizontal';
     host.classList.toggle('horizontal',horizontal);host.style.setProperty('--pages-per-spread',width);
     const groups=[];
-    for(let i=0;i<slots.length;i+=width){const spread=document.createElement('div');spread.className='pdf-spread';slots.slice(i,i+width).forEach(slot=>spread.appendChild(slot.sheet));groups.push(spread);}
-    host.replaceChildren(...groups);$('pdf-direction').disabled=comparison;
+    const active=comparison&&selectedPages.length?selectedPages.map(n=>slots[n-1]).filter(Boolean):slots;
+    for(let i=0;i<active.length;i+=width){const spread=document.createElement('div');spread.className='pdf-spread';active.slice(i,i+width).forEach(slot=>spread.appendChild(slot.sheet));groups.push(spread);}
+    host.replaceChildren(...groups);$('pdf-direction').disabled=comparison;$('pdf-layout').disabled=comparison;
     observer=new IntersectionObserver(entries=>{
       for(const entry of entries){const slot=slots[+entry.target.dataset.page-1];slot.near=entry.isIntersecting;
         if(slot.near)render(slot);else if(slot.canvas){slot.surface.replaceChildren();slot.canvas=null;}
@@ -54,27 +55,29 @@ window.StudioPDF = (() => {
     },{root:$('score-scroll'),rootMargin:'250px',threshold:0});
     slots.forEach(s=>observer.observe(s.sheet));controls();
   }
-  async function open(id,annotations,onSave){
+  async function open(id,annotations,onSave,sizes=[],pages=[]){
+    const token=++request;const pagesChanged=String(selectedPages)!==String(pages);selectedPages=pages||[];
     if(scoreId!==id||JSON.stringify(marks)!==JSON.stringify(annotations||[]))redoByPage.clear();
     marks=structuredClone(annotations||[]);save=onSave;
     if(scoreId!==id){
       const module=await import('/vendor/pdf.mjs');module.GlobalWorkerOptions.workerSrc='/vendor/pdf.worker.mjs';
       const response=await fetch('/api/source/'+id);if(!response.ok)throw new Error('Original PDF is unavailable.');
       const next=await module.getDocument({data:new Uint8Array(await response.arrayBuffer()),isEvalSupported:false}).promise;
+      if(token!==request){await next.destroy();return;}
       generation++;observer?.disconnect();if(pdf)await pdf.destroy();pdf=next;scoreId=id;page=1;
       slots=Array.from({length:pdf.numPages},(_,i)=>{
         const sheet=document.createElement('div'),surface=document.createElement('div'),ink=document.createElementNS('http://www.w3.org/2000/svg','svg');
-        sheet.className='pdf-sheet';sheet.dataset.page=i+1;surface.className='pdf-surface';
+        sheet.className='pdf-sheet';if(sizes?.[i])sheet.style.aspectRatio=sizes[i].join('/');sheet.dataset.page=i+1;surface.className='pdf-surface';
         ink.setAttribute('viewBox','0 0 1000 1000');ink.setAttribute('preserveAspectRatio','none');ink.classList.add('pdf-ink');ink.setAttribute('aria-label','Annotations on page '+(i+1));
         const label=document.createElement('span');label.className='pdf-sheet-number';label.textContent=i+1;
         sheet.append(surface,ink,label);const slot={number:i+1,sheet,surface,ink};bind(slot);return slot;
       });arrange();
-    }
+    }else if(pagesChanged)arrange();
     setTool(tool);redraw();
   }
   function setTool(next){tool=next;slots.forEach(s=>{s.ink.style.touchAction=tool==='pan'?'auto':'none';s.ink.style.pointerEvents=tool==='pan'?'none':'auto';});document.querySelectorAll('[data-ink]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.ink===tool)));}
   document.querySelectorAll('[data-ink]').forEach(b=>b.onclick=()=>setTool(b.dataset.ink));
-  function navigate(delta){page=Math.max(1,Math.min(pdf?.numPages||1,page+delta*(+$('pdf-layout').value||1)));const slot=slots[page-1];if(!slot)return;const host=$('pdf-pages');if(host.classList.contains('horizontal'))host.scrollTo({left:slot.sheet.parentElement.offsetLeft-host.offsetLeft,behavior:'smooth'});else{const pane=$('score-scroll');pane.scrollTo({top:pane.scrollTop+slot.sheet.getBoundingClientRect().top-pane.getBoundingClientRect().top-90,behavior:'smooth'});}controls();}
+  function navigate(delta){const visible=comparison&&selectedPages.length?selectedPages:slots.map(s=>s.number);const index=Math.max(0,visible.indexOf(page));page=visible[Math.max(0,Math.min(visible.length-1,index+delta*(comparison?1:+$('pdf-layout').value||1)))];const slot=slots[page-1];if(!slot)return;const host=$('pdf-pages');if(host.classList.contains('horizontal'))host.scrollTo({left:slot.sheet.parentElement.offsetLeft-host.offsetLeft,behavior:'smooth'});else{const pane=$('score-scroll');pane.scrollTo({top:pane.scrollTop+slot.sheet.getBoundingClientRect().top-pane.getBoundingClientRect().top-90,behavior:'smooth'});}controls();}
   $('pdf-prev').onclick=()=>navigate(-1);$('pdf-next').onclick=()=>navigate(1);
   $('pdf-layout').onchange=$('pdf-direction').onchange=()=>{if(pdf)arrange();};
   $('pdf-undo').onclick=()=>{if(stroke)return;const i=marks.findLastIndex(m=>m.page===page);if(i>=0){const history=redoByPage.get(page)||[];history.push({index:i,mark:marks.splice(i,1)[0]});redoByPage.set(page,history);redraw();save?.(structuredClone(marks));}};

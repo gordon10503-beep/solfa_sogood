@@ -20,7 +20,7 @@ function run(fn) { return async (...args) => { try { await fn(...args); } catch(
 function on(id, event, fn) { $(id).addEventListener(event,run(fn)); }
 async function library() {
   const result = await api("/api/library"); state.library=result.scores; state.scanner=result.scanner;
-  if(result.storage==="Neon"){document.querySelector(".sidebar-bottom strong").textContent="Shared workspace";document.querySelector(".sidebar-bottom small").textContent="Score library saved in Neon";document.querySelector(".workspace-label .local-dot").title="Hosted library";document.title="solfa_sogood · Shared music workspace";}
+  if(result.storage==="Neon"){document.querySelector(".sidebar-bottom strong").textContent="Personal library";document.querySelector(".sidebar-bottom small").textContent="Score library saved in Neon";document.querySelector(".workspace-label .local-dot").title="Hosted library";document.title="solfa_sogood · Shared music workspace";}
   syncScanJobs(result.scanJobs||[]);
   $("score-count").textContent=state.library.filter(s=>!s.trashed).length;
   renderLibrary();
@@ -68,7 +68,9 @@ async function openScore(id, preserve=false) {
   if(generation!==state.openGeneration)return;
   state.score=result;setupLoop(result);state.playbackCursor=new PlaybackCursor(result.events,result.measureTimes);activeHighlightIds=new Set();activeBarElement=null;
   $("reader-format").querySelectorAll("option").forEach(o=>{if(o.value!=="notation")o.disabled=result.sourceType!=="application/pdf";});
-  $("reader-format").value=result.sourceType==="application/pdf"?"compare":"notation";state.position=Math.min(oldPosition,result.duration);state.selected=null;document.querySelectorAll("[data-symbol]").forEach(b=>b.disabled=true);
+  document.querySelector('[data-view="original"]').hidden=result.sourceType!=="application/pdf";
+  if(state.view==="original" && result.sourceType!=="application/pdf")state.view="read";
+  state.position=Math.min(oldPosition,result.duration);state.selected=null;document.querySelectorAll("[data-symbol]").forEach(b=>b.disabled=true);
   state.mixer=result.parts.map((p,i)=>({...{sounds:["Piano"],volume:.7,mute:false,solo:false},...(result.meta.mixer?.[i]||{})}));
   if(!preserve) {
     const practice=result.meta.practice||{};
@@ -82,7 +84,14 @@ async function openScore(id, preserve=false) {
   $("breadcrumb").textContent="Score reader";$("library-view").hidden=true;$("score-view").hidden=false;
   $("scan-banner").hidden=result.meta.reviewed || (result.meta.origin!=="Scan" && !result.issues.length);
   $("scan-banner").textContent=result.issues.length?`${result.issues.length} notation checks need attention. Open “Check score” before relying on playback.`:"Recognition is a first draft. Compare the scan, correct notes, then mark it reviewed.";
-  const pageContainers=result.pages.map(()=>{const el=document.createElement('div');el.className='score-page';el.style.minHeight='400px';return el;});
+  const pageContainers=result.pages.map((_,index)=>{
+    const el=document.createElement('div');el.className='score-page';
+    const pages=result.sourcePages?.length?result.sourcePages:null;
+    const dims=result.sourceSizes?.[(pages?.[index]||index+1)-1] || result.sourceSizes?.at(-1);
+    if(dims){el.classList.add('source-paper');el.style.aspectRatio=dims.join('/');}
+    else el.style.minHeight='400px';
+    return el;
+  });
   $("pages").replaceChildren(...pageContainers);
   function mountPage(i){
     if(generation!==state.openGeneration)return;
@@ -110,19 +119,25 @@ async function openScore(id, preserve=false) {
   let nextPage=1;
   function mountLater(){if(generation!==state.openGeneration||nextPage>=result.pages.length)return;mountPage(nextPage++);(window.requestIdleCallback||requestAnimationFrame)(mountLater);}
   (window.requestIdleCallback||requestAnimationFrame)(mountLater);
-  renderMixer();renderBookmarks();renderIssues();fillComposer();setView(state.view);updateTransport();
+  renderMixer();renderBookmarks();renderIssues();fillComposer();setView(state.view,false);updateTransport();
   $("reviewed").checked=!!result.meta.reviewed;$("source-btn").disabled=!result.hasSource;
   $("source-btn").textContent=result.hasSource?"View original scan ↗":"No scan attached · MusicXML source";
   setPianoAction(null);$("repitch-key").disabled=true;$("insert-key").disabled=true;
   $("apply-note").disabled=true;$("note-selection").textContent="Select a note on the score";
   $("score-scroll").scrollTop=oldScroll;renderLibrary();busy(false);await readerFormat();
 }
-function setView(view) {
+function setView(view, refresh=true) {
+  const format = state.score?.sourceType==="application/pdf" ?
+    ({original:"pdf",review:"compare"}[view] || "notation") : "notation";
+  const changed=$("reader-format").value!==format;
+  $("reader-format").value=format;
+  if(changed && refresh)run(readerFormat)();
+  $("edit-strip").hidden=!["compose","review"].includes(view);
   if(view!=="compose")setPianoAction(null);
   state.view=view;
   document.body.dataset.page=view;
-  document.querySelector(".inspector").hidden=view==="read";
-  $("breadcrumb").textContent={read:"Read",practice:"Practice",compose:"Compose",review:"Review"}[view];
+  document.querySelector(".inspector").hidden=["read","original"].includes(view);
+  $("breadcrumb").textContent={read:"Read notation",original:"Original PDF",practice:"Practice",compose:"Compose",review:"Review"}[view];
   $("minor-do").closest("label").hidden=$("solfa-mode").value!=="movable";
   document.querySelectorAll("[data-view]").forEach(b=>{b.classList.toggle("active",b.dataset.view===view);b.setAttribute("aria-selected",String(b.dataset.view===view));});
   ["read","compose","review"].forEach(v=>$(v+"-panel").hidden=(v==="read" ? view!=="practice" : v!==view));
@@ -146,18 +161,24 @@ function bindPitchDrag(note, n) {
     drag.moved = true;
     const pitch = Math.min(62, Math.max(0, 7*n.octave+steps.indexOf(n.step)+Math.round(delta/drag.halfSpace)));
     drag.step = steps[pitch%7]; drag.octave = Math.floor(pitch/7);
+    const scale=note.getScreenCTM()?.d;
+    if(scale){
+      if(drag.original===undefined)drag.original=note.getAttribute("transform")||"";
+      note.setAttribute("transform",drag.original+" translate(0 "+(-(pitch-(7*n.octave+steps.indexOf(n.step)))*drag.halfSpace/scale)+")");
+    }
     const label = $("drag-pitch");
     label.textContent = drag.step + ({"-2":"𝄫","-1":"♭","1":"♯","2":"𝄪"}[n.alter] || "") + drag.octave;
     label.hidden = false; label.style.left = event.clientX+"px"; label.style.top = event.clientY+"px";
   });
-  note.addEventListener("pointercancel", () => {drag=null; $("drag-pitch").hidden=true;});
+  note.addEventListener("pointercancel", () => {if(drag?.original!==undefined)note.setAttribute("transform",drag.original);drag=null; $("drag-pitch").hidden=true;});
   note.addEventListener("pointerup", run(async event => {
     if (!drag || event.pointerId !== drag.pointer) return;
     const target = drag;
+    if(drag.original!==undefined)note.setAttribute("transform",drag.original);
     drag = null; $("drag-pitch").hidden=true;
     if (!target.moved || (target.step===n.step && target.octave===n.octave)) return;
     await edit("note", {nid:n.id, step:target.step, octave:target.octave, alter:n.alter});
-    selectNote(n.id);
+    if(state.view==="compose")selectNote(n.id);
   }));
 }
 
@@ -541,7 +562,30 @@ on("entry-back","click",()=>{$("phrase").value=$("phrase").value.trim().split(/\
 on("note-form","submit",async e=>{e.preventDefault();if(!state.selected)return;await edit("note",{nid:state.selected,step:$("note-step").value,alter:+$("note-alter").value,octave:+$("note-octave").value,lyric:$("note-lyric").value});});
 on("replace-bar","click",()=>edit("bar",{part:+$("compose-part").value,measure:+$("compose-bar").value,phrase:$("phrase").value}));
 on("append-bar","click",()=>edit("append"));
-on("undo-btn","click",async()=>{if(!state.score)return;await state.saving;busy(true,"Restoring previous version…");const id=state.score.id;await api("/api/undo",{id,revision:state.score.revision});await library();await openScore(id,true);toast("Previous version restored.");});
+async function restoreScore(direction){
+  if(!state.score||state.historyBusy)return;
+  state.historyBusy=true;
+  try{
+    await state.saving;const id=state.score.id;busy(true,"Restoring score…");
+    await api("/api/"+direction,{id,revision:state.score.revision});
+    await library();await openScore(id,true);
+  }finally{state.historyBusy=false;busy(false);}
+}
+on("undo-btn","click",()=>restoreScore("undo"));
+on("history-back","click",()=>restoreScore("undo"));
+on("history-forward","click",()=>restoreScore("redo"));
+document.addEventListener("keydown",run(async e=>{
+  if(!(e.ctrlKey||e.metaKey)||e.altKey||e.target.closest("input,textarea,select,dialog,[contenteditable=true]")||$("edit-strip").hidden)return;
+  const key=e.key.toLowerCase();if(!["z","y"].includes(key))return;
+  e.preventDefault();if(!e.repeat)await restoreScore(key==="y"||e.shiftKey?"redo":"undo");
+}));
+on("logout-btn","click",async()=>{await state.saving;await api("/api/logout",{});location.replace("/");});
+on("invite-btn","click",async()=>{const result=await api("/api/invite",{});const field=$("invite-url");field.hidden=false;field.value=location.origin+"/#invite="+result.invite;field.select();toast("Copy this one-use link for your friend. It expires in seven days.");});
+for(const [id,property] of [["title-height","--title-spacing"],["tool-height","--tool-spacing"]]){
+  const input=$(id);input.value=localStorage.getItem(id)??input.value;
+  const apply=()=>document.documentElement.style.setProperty(property,input.value+"px");
+  apply();input.oninput=()=>{apply();localStorage.setItem(id,input.value);};
+}
 on("xml-btn","click",async()=>{const r=await fetch(`/api/xml/${state.score.id}`);$("xml-editor").value=await r.text();$("xml-dialog").showModal();});
 on("xml-save","click",async()=>{await edit("xml",undefined,{xml:$("xml-editor").value});$("xml-dialog").close();});
 on("source-btn","click",()=>{if(state.score.hasSource){$("source-frame").src=`/api/source/${state.score.id}`;$("source-dialog").showModal();}});
@@ -572,7 +616,8 @@ document.addEventListener("keydown",run(async e=>{
   const index="awsedftgyhujk".indexOf(e.key.toLowerCase());if(index>=0){e.preventDefault();await keyboardNote(60+index);}
 }));
 window.addEventListener("beforeunload",()=>{pause();});
-run(async()=>{state.token=(await api("/api/session")).token;makeKeyboard();await library();if(state.library.length)await openScore(state.library[0].id);showLibrary();requestAnimationFrame(animate);})();
+run(async()=>{const session=await api("/api/session");state.token=session.token;
+  if(session.username){$("account-panel").hidden=false;$("account-name").textContent=session.username;$("invite-btn").hidden=session.username!=="studio";}makeKeyboard();await library();if(state.library.length)await openScore(state.library[0].id);showLibrary();requestAnimationFrame(animate);})();
 
 function renderDraft(){
   const symbols={w:"𝅝",h:"𝅗𝅥",q:"♩",e:"♪",s:"♬"};
@@ -598,7 +643,7 @@ async function readerFormat(){
   controls.hidden=!original;
   $("digital-reader").hidden=format==="pdf";
   $("pages").hidden=format==="pdf";$("pdf-reader").hidden=!original;
-  if(original&&state.score){const id=state.score.id;await StudioPDF.open(id,state.score.meta.annotations,marks=>queueMeta({annotations:marks},id));}
+  if(original&&state.score){const id=state.score.id;await StudioPDF.open(id,state.score.meta.annotations,marks=>queueMeta({annotations:marks},id),state.score.sourceSizes,state.score.sourcePages);}
 }
 on("reader-format","change",readerFormat);
 

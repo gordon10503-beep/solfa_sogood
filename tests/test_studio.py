@@ -454,3 +454,20 @@ def test_bar_timing_chords_overlaps_gaps_and_compound_meter():
     assert bar_rhythm([(0, 1), (0, 1), (.5, 1.5), (2, 3.5)], 3, 8) == {
         "covered": 3, "remaining": 0, "possibleMeter": "6/8"}
     assert bar_rhythm([], 4, 4)["possibleMeter"] is None
+
+def test_undo_redo_branches_and_palette_rests(tmp_path):
+    from src.studio.document import place_note
+    lib = Library(tmp_path / "redo.db")
+    original = new_score("Blank",template="melody",bars=1)
+    sid = lib.add(original)
+    placed = place_note(original,"ss-p0-m0-n0","quarter","A",4,offset=1)
+    notes = list(inspect(read_xml(placed))["notes"].values())
+    assert [(n["rest"],n["duration"]) for n in notes] == [(True,1),(False,1),(True,2)]
+    assert notes[1]["step"] == "A"
+    lib.update(sid,1,data=placed)
+    lib.update(sid,2,undo=True)
+    assert lib.update(sid,3,redo=True)["xml"] == placed
+    lib.update(sid,4,undo=True)
+    lib.update(sid,5,metadata={"group":"New branch"})
+    with pytest.raises(ValueError):
+        lib.update(sid,6,redo=True)

@@ -1,6 +1,8 @@
 """Score workspace backed by local SQLite or hosted PostgreSQL."""
 from __future__ import annotations
 
+from types import SimpleNamespace
+from . import accounts
 import argparse
 from contextlib import contextmanager
 import base64
@@ -28,7 +30,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from .document import (MAX_BYTES, append_bar, edit_symbol, move_part, rename_part, edit_note, insert_after_note, edit_meter, engrave, inspect,
+from .document import (MAX_BYTES, append_bar, edit_symbol, move_part, rename_part, edit_note, insert_after_note, place_note, edit_meter, engrave, inspect,
                        new_score, read_xml, replace_bar, xml_bytes)
 
 from PIL import Image
@@ -94,13 +96,22 @@ class PostgresQueries:
 
 
 class Library:
-    def __init__(self, path, database_url=None):
+    def __init__(self, path, database_url=None, schema="public"):
         self.path = Path(path)
         self.database_url = database_url
+        self.schema = schema
         self.path.parent.mkdir(parents=True, exist_ok=True)
         blob = "BYTEA" if database_url else "BLOB"
         identity = "BIGSERIAL" if database_url else "INTEGER"
         with self.connect() as db:
+            if database_url and schema != "public":
+                from psycopg import sql
+                db.connection.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema)))
+            if database_url and schema == "public":
+                db.execute("CREATE TABLE IF NOT EXISTS studio_users (name TEXT PRIMARY KEY, salt TEXT NOT NULL, hash TEXT NOT NULL, space TEXT UNIQUE NOT NULL)")
+                db.execute("CREATE TABLE IF NOT EXISTS studio_invites (hash TEXT PRIMARY KEY, expires DOUBLE PRECISION NOT NULL)")
+            db.execute(f"""CREATE TABLE IF NOT EXISTS redo_history (
+                id {identity} PRIMARY KEY, score TEXT, xml {blob}, meta TEXT)""")
             db.execute(f"""CREATE TABLE IF NOT EXISTS scores (
                 id TEXT PRIMARY KEY, xml {blob} NOT NULL, meta TEXT NOT NULL,
                 source {blob}, source_type TEXT, updated DOUBLE PRECISION NOT NULL,
@@ -114,6 +125,7 @@ class Library:
             import psycopg
             from psycopg.rows import dict_row
             with psycopg.connect(self.database_url, row_factory=dict_row, connect_timeout=12) as conn:
+                conn.execute("SELECT set_config('search_path', %s, true)", (self.schema,))
                 yield PostgresQueries(conn)
         else:
             db = sqlite3.connect(self.path, timeout=30)
@@ -157,7 +169,7 @@ class Library:
                        (sid, xml_bytes(root), json.dumps(meta), source, source_type, meta["created"]))
         return sid
 
-    def update(self, sid, revision, data=None, metadata=None, undo=False):
+    def update(self, sid, revision, data=None, metadata=None, undo=False, redo=False):
         with self.connect() as db:
             self.lock_writes(db)
             row = db.execute("SELECT * FROM scores WHERE id=?", (sid,)).fetchone()
@@ -165,12 +177,15 @@ class Library:
             if row["revision"] != revision:
                 raise ValueError("This score changed in another window. Reopen it before editing.")
             meta = json.loads(row["meta"])
-            if undo:
-                old = db.execute("SELECT * FROM history WHERE score=? ORDER BY id DESC LIMIT 1", (sid,)).fetchone()
-                if old is None: raise ValueError("There are no earlier changes to undo.")
+            if undo or redo:
+                source, target = ("history", "redo_history") if undo else ("redo_history", "history")
+                old = db.execute(f"SELECT * FROM {source} WHERE score=? ORDER BY id DESC LIMIT 1", (sid,)).fetchone()
+                if old is None: raise ValueError("No more changes in this direction.")
+                db.execute(f"INSERT INTO {target}(score,xml,meta) VALUES (?,?,?)", (sid,row["xml"],row["meta"]))
                 data, meta = old["xml"], json.loads(old["meta"])
-                db.execute("DELETE FROM history WHERE id=?", (old["id"],))
+                db.execute(f"DELETE FROM {source} WHERE id=?", (old["id"],))
             else:
+                db.execute("DELETE FROM redo_history WHERE score=?", (sid,))
                 db.execute("INSERT INTO history(score,xml,meta) VALUES (?,?,?)", (sid, row["xml"], row["meta"]))
                 if metadata is not None:
                     for field in ("group", "bookmarks", "reviewed", "mixer", "practice", "annotations", "playbackReady", "scanError", "title", "trashed"):
@@ -182,16 +197,27 @@ class Library:
                 db.execute("DELETE FROM history WHERE score=? AND id NOT IN (SELECT id FROM history WHERE score=? ORDER BY id DESC LIMIT 50)", (sid, sid))
             if row["revision"] == 1:
                 meta.setdefault("created", row["updated"])
-            if undo or (metadata and "title" in metadata):
+            if undo or redo or (metadata and "title" in metadata):
                 meta["title"] = available_title(db, meta["title"], sid)
             db.execute("UPDATE scores SET xml=?,meta=?,updated=?,revision=revision+1 WHERE id=?",
                        (data if data is not None else row["xml"], json.dumps(meta), time.time(), sid))
         return self.get(sid)
 
 
+def pdf_dimensions(row):
+    if row["source_type"] != "application/pdf" or not row["source"]:
+        return []
+    import pymupdf
+    try:
+        with pymupdf.open(stream=row["source"], filetype="pdf") as doc:
+            return [[round(page.rect.width,2),round(page.rect.height,2)] for page in doc]
+    except (ValueError, RuntimeError):
+        return []
+
+
 @functools.lru_cache(maxsize=6)
-def rendered(data, mode, minor_do, solfa):
-    return engrave(data, mode, minor_do, solfa)
+def rendered(data, mode, minor_do, solfa, paper=None):
+    return engrave(data, mode, minor_do, solfa, paper)
 
 
 def seed(library):
@@ -215,6 +241,9 @@ class StudioServer(ThreadingHTTPServer):
 
     def __init__(self, address, library):
         super().__init__(address, Handler)
+        self.workspaces = {}
+        self.workspace_lock = threading.Lock()
+        self.login_slots = threading.BoundedSemaphore(2)
         self.scan_lock = threading.Lock()
         self.public_host = None
         self.workspace_password = None
@@ -227,7 +256,7 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
-    def respond(self, data, kind="application/json", status=200, etag=None):
+    def respond(self, data, kind="application/json", status=200, etag=None, cookie=None):
         if not isinstance(data, bytes):
             data = json.dumps(data).encode() if kind == "application/json" else data.encode()
         if etag and self.headers.get("If-None-Match") == etag:
@@ -241,6 +270,7 @@ class Handler(BaseHTTPRequestHandler):
         if compressed:
             data = gzip.compress(data, compresslevel=3)
         self.send_response(status)
+        if cookie: self.send_header("Set-Cookie",cookie)
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "private, max-age=0, must-revalidate" if etag else "no-store")
@@ -263,39 +293,70 @@ class Handler(BaseHTTPRequestHandler):
             not self.headers.get("Origin") or self.headers["Origin"] in {f"http://{h}" for h in allowed})
 
     def authenticated(self):
+        self.workspace = self.server
+        self.username = None
         if self.server.public_host is None:
             return True
-        expected = base64.b64encode(("studio:" + self.server.workspace_password).encode())
-        if secrets.compare_digest(self.headers.get("Authorization", "").encode(), b"Basic " + expected):
-            return True
-        self.send_response(401)
-        self.send_header("WWW-Authenticate", 'Basic realm="Solfa Studio", charset="UTF-8"')
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        return False
+        identity = accounts.session_identity(self.headers.get("Cookie"), self.server.workspace_password)
+        if identity is None:
+            if urlparse(self.path).path == "/":
+                self.respond((STATIC/"login.html").read_bytes(),"text/html")
+            else:
+                self.respond({"error":"Sign in to your workspace."},status=401)
+            return False
+        self.username, schema = identity
+        if schema != "public":
+            with self.server.workspace_lock:
+                if schema not in self.server.workspaces:
+                    library = self.server.library
+                    self.server.workspaces[schema] = SimpleNamespace(
+                        library=Library(library.path,library.database_url,schema),
+                        jobs={},token=secrets.token_urlsafe(32),public_host=self.server.public_host,
+                        scan_lock=self.server.scan_lock)
+                self.workspace = self.server.workspaces[schema]
+        return True
+
+    def sign_in(self, registering):
+        if not self.server.login_slots.acquire(blocking=False):
+            return self.respond({"error":"Please retry in a moment."},status=429)
+        try:
+            length = int(self.headers.get("Content-Length",0))
+            if not 0 < length <= 4096: raise ValueError("Invalid sign-in request.")
+            payload = json.loads(self.rfile.read(length))
+            identity = accounts.authenticate(self.server.library,self.server.workspace_password,payload,registering)
+            self.respond({"ok":True},cookie=accounts.session_cookie(identity,self.server.workspace_password))
+        except (ValueError,TypeError):
+            self.respond({"error":"Check your username and password, or request a fresh invitation."},status=400)
+        finally:
+            self.server.login_slots.release()
 
     def do_GET(self):
         if self.path == "/healthz":
             return self.respond({"status": "ok"})
-        if not self.authenticated(): return
         if not self.allowed(): return self.respond({"error": "Local access only."}, status=403)
         path = urlparse(self.path)
+        if path.path in ("/login.js","/login.css"):
+            return self.respond((STATIC/path.path[1:]).read_bytes(),"text/javascript" if path.path.endswith(".js") else "text/css")
+        if not self.authenticated(): return
         try:
             if path.path == "/api/library":
-                return self.respond({"scores": self.server.library.list(), "scanner": bool(audiveris_path()),
-                                     "storage": "Neon" if self.server.public_host else str(self.server.library.path), "build": "2026-11-18-scan-review",
-                                     "scanJobs": [{"job": job, **scan_status(self.server, job)} for job in list(self.server.jobs)]})
+                return self.respond({"scores": self.workspace.library.list(), "scanner": bool(audiveris_path()),
+                                     "storage": "Neon" if self.server.public_host else str(self.workspace.library.path), "build": "2026-11-18-personal-libraries",
+                                     "scanJobs": [{"job": job, **scan_status(self.workspace, job)} for job in list(self.workspace.jobs)]})
             if path.path.startswith("/api/job/"):
-                return self.respond(scan_status(self.server, path.path.split("/")[-1]))
+                return self.respond(scan_status(self.workspace, path.path.split("/")[-1]))
             if path.path.startswith("/api/score/"):
-                row = self.server.library.get(path.path.split("/")[-1])
+                row = self.workspace.library.get(path.path.split("/")[-1])
                 q = parse_qs(path.query)
                 mode = q.get("mode", ["movable"])[0]
                 if mode not in ("movable", "fixed", "pitch"): raise ValueError("Invalid sol-fa mode.")
-                result = rendered(row["xml"], mode, q.get("minor", ["false"])[0] == "true", q.get("solfa", ["true"])[0] == "true")
-                return self.respond({**result, "id": row["id"], "meta": row["meta"], "revision": row["revision"], "hasSource": row["source"] is not None, "sourceType": row["source_type"], "title": row["meta"].get("title", result["title"])})
+                sizes = pdf_dimensions(row)
+                chosen = [int(n) for n in row["meta"].get("scanPages",[]) if 1 <= int(n) <= len(sizes)]
+                paper = tuple(sizes[(chosen or [1])[0]-1]) if sizes else None
+                result = rendered(row["xml"], mode, q.get("minor", ["false"])[0] == "true", q.get("solfa", ["true"])[0] == "true", paper)
+                return self.respond({**result, "sourceSizes": sizes, "sourcePages": chosen, "id": row["id"], "meta": row["meta"], "revision": row["revision"], "hasSource": row["source"] is not None, "sourceType": row["source_type"], "title": row["meta"].get("title", result["title"])})
             if path.path.startswith("/api/bundle/"):
-                row = self.server.library.get(path.path.split("/")[-1])
+                row = self.workspace.library.get(path.path.split("/")[-1])
                 title = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", row["meta"]["title"]).strip(" .")[:120] or "Score"
                 archive = io.BytesIO()
                 with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
@@ -305,13 +366,13 @@ class Handler(BaseHTTPRequestHandler):
                         bundle.writestr(f"{title}/Original{extension}", row["source"])
                 return self.respond(archive.getvalue(), "application/zip")
             if path.path.startswith("/api/xml/"):
-                row = self.server.library.get(path.path.split("/")[-1])
+                row = self.workspace.library.get(path.path.split("/")[-1])
                 return self.respond(row["xml"], "application/vnd.recordare.musicxml+xml")
             if path.path.startswith("/api/source/"):
-                row = self.server.library.get(path.path.split("/")[-1])
+                row = self.workspace.library.get(path.path.split("/")[-1])
                 if row["source"] is None: raise ValueError("No source scan is attached.")
                 return self.respond(row["source"], row["source_type"])
-            if path.path == "/api/session": return self.respond({"token": self.server.token})
+            if path.path == "/api/session": return self.respond({"token": self.workspace.token, "username": self.username})
             relative = "index.html" if path.path == "/" else path.path.lstrip("/")
             file = (STATIC / relative).resolve()
             if not file.is_relative_to(STATIC.resolve()) or not file.is_file():
@@ -327,15 +388,23 @@ class Handler(BaseHTTPRequestHandler):
             self.respond({"error": "Could not process this score. Check its MusicXML structure."}, status=422)
 
     def do_POST(self):
+        if not self.allowed(): return self.respond({"error":"Invalid request origin."},status=403)
+        if self.server.public_host and self.path in ("/api/login","/api/register"):
+            if self.headers.get_content_type() != "application/json": return self.respond({"error":"JSON required."},status=400)
+            return self.sign_in(self.path == "/api/register")
         if not self.authenticated(): return
-        if not self.allowed() or self.headers.get("X-Studio-Token") != self.server.token:
+        if not self.allowed() or self.headers.get("X-Studio-Token") != self.workspace.token:
             return self.respond({"error": "Reload the local app to continue."}, status=403)
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if not 0 < length <= MAX_BYTES * 1.4: raise ValueError("Request is empty or too large (40 MB file limit).")
             payload = json.loads(self.rfile.read(length))
             route = urlparse(self.path).path
-            lib = self.server.library
+            lib = self.workspace.library
+            if route == "/api/invite" and self.username == "studio":
+                return self.respond({"invite":accounts.invite(lib)})
+            if route == "/api/logout":
+                return self.respond({"ok":True},cookie="solfa_session=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax")
             if route == "/api/new":
                 return self.respond({"id": lib.add(new_score(**payload), {"origin": "Composition"})})
             if route == "/api/import-pair":
@@ -361,7 +430,7 @@ class Handler(BaseHTTPRequestHandler):
                 rescan_row = lib.get(payload["id"]) if route == "/api/rescan" else None
                 if rescan_row:
                     if rescan_row["source"] is None: raise ValueError("No original scan is attached.")
-                    if any(j.get("id") == payload["id"] and j.get("status") == "running" for j in self.server.jobs.values()): raise ValueError("This score is already scanning.")
+                    if any(j.get("id") == payload["id"] and j.get("status") == "running" for j in self.workspace.jobs.values()): raise ValueError("This score is already scanning.")
                     payload["name"] = rescan_row["meta"].get("sourceFileName", rescan_row["meta"]["title"])
                 command = audiveris_path()
                 data = rescan_row["source"] if rescan_row else base64.b64decode(payload["data"], validate=True)
@@ -371,9 +440,9 @@ class Handler(BaseHTTPRequestHandler):
                 sid = payload["id"] if rescan_row else lib.add(new_score(title=Path(payload["name"]).stem, template="melody", bars=1), {"origin": "Scan", "playbackReady": False, "title": payload["name"], "sourceFileName": payload["name"]}, data, "application/pdf" if ext == ".pdf" else mimetypes.guess_type(payload["name"])[0])
                 if not command: return self.respond({"id": sid, "job": None})
                 job = uuid.uuid4().hex
-                self.server.jobs[job] = {"status": "running", "stage": 0, "started": time.time(), "id": sid,
+                self.workspace.jobs[job] = {"status": "running", "stage": 0, "started": time.time(), "id": sid,
                                          "name": payload["name"], "message": "Preparing scan"}
-                threading.Thread(target=run_scan, args=(self.server, job, command, data, ext, sid, {"pages": pages, "layout": layout, "cueNotes": cue_mode, "language": language}), daemon=True).start()
+                threading.Thread(target=run_scan, args=(self.workspace, job, command, data, ext, sid, {"pages": pages, "layout": layout, "cueNotes": cue_mode, "language": language}), daemon=True).start()
                 return self.respond({"job": job, "id": sid})
             sid, revision = payload["id"], int(payload["revision"])
             row = lib.get(sid)
@@ -383,11 +452,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond({"id": lib.add(row["xml"], meta, row["source"], row["source_type"])})
             if route == "/api/meta":
                 result = lib.update(sid, revision, metadata=payload["meta"])
-            elif route == "/api/undo": result = lib.update(sid, revision, undo=True)
+            elif route in ("/api/undo","/api/redo"): result = lib.update(sid,revision,undo=route=="/api/undo",redo=route=="/api/redo")
             elif route == "/api/edit":
                 action = payload["action"]
                 metadata = None
                 if action == "note": data = edit_note(row["xml"], **payload["values"])
+                elif action == "place": data = place_note(row["xml"], **payload["values"])
                 elif action == "insert-note": data = insert_after_note(row["xml"], **payload["values"])
                 elif action == "symbol": data = edit_symbol(row["xml"], **payload["values"])
                 elif action == "move-part":
@@ -485,8 +555,9 @@ def scan(server, job, command, data, ext, sid=None, options=None):
             # Scan completion must not overwrite concurrent annotation edits.
             with server.library.connect() as db:
                 server.library.lock_writes(db)
+                db.execute("DELETE FROM redo_history WHERE score=?", (sid,))
                 row = db.execute("SELECT meta FROM scores WHERE id=?", (sid,)).fetchone()
-                meta = json.loads(row["meta"]);meta.update(playbackReady=True, reviewed=False, reviewNote=layout_warning or "")
+                meta = json.loads(row["meta"]);meta.update(playbackReady=True, reviewed=False, reviewNote=layout_warning or "", scanPages=options.get("pages") or [])
                 db.execute("UPDATE scores SET xml=?,meta=?,updated=?,revision=revision+1 WHERE id=?", (xml_bytes(read_xml(output)),json.dumps(meta),time.time(),sid))
         progress(4, "Scan ready · check the result against the original", status="done", id=sid, finished=time.time())
     except Exception as exc:
@@ -508,7 +579,7 @@ def start_or_reuse(port, library, open_browser=True):
                 is_studio = response.headers.get("Server", "").startswith("SolfaStudio/")
                 info = json.load(response)
             same_library = Path(info.get("storage", "")).resolve() == library.path.resolve()
-            if is_studio and same_library and info.get("build") != "2026-11-18-scan-review":
+            if is_studio and same_library and info.get("build") != "2026-11-18-personal-libraries":
                 print("An older Studio is running; opening the updated version on the next port.", flush=True)
                 return start_or_reuse(port + 1, library, open_browser)
             if is_studio and same_library:

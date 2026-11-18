@@ -74,7 +74,16 @@ Open **Check score** to compare the original PDF with the recognized music. Warn
 
 1. In Neon create a Postgres project in Singapore. In **Connect**, copy the pooled connection string including its TLS parameters.
 2. In Render choose **New → Blueprint** and select this repository on `main`. The blueprint creates one free Docker web service in Singapore. Paste the Neon connection string into the secret `DATABASE_URL` field.
-3. Open the service URL over HTTPS. Use username `studio` and the generated `STUDIO_PASSWORD` from Render’s Environment page. Everyone with that password can read and edit the same library.
+3. Open the service URL over HTTPS. Use username `studio` and the generated `STUDIO_PASSWORD` from Render’s Environment page. This signs you into the owner library. In the account menu choose **Create invitation** and send the one-use link to one friend. They choose their own username and password. Each personal library has separate scores, originals, annotations and undo history. Invitations expire after seven days. Keep the owner password private.
 4. Import a small PDF to check scanning on your instance. The container includes Audiveris and English, Simplified Chinese and Traditional Chinese OCR data. Large scans can exceed a free instance’s memory. Restarted instances lose active scans and temporary logs. Saved scores, originals and edit history reside in Neon. A newly hosted workspace starts with a demo score.
 
 [Render Blueprint settings](https://render.com/docs/blueprint-spec) · [Neon connection setup](https://neon.com/docs/connect/connect-from-any-app)
+
+
+## Read and edit on a tablet
+
+**Read notation** opens the editable engraving. **Original PDF** opens the source pages. **Check score** opens both in comparison using the original page dimensions and available encoded page breaks. Missing recognition or missing page breaks can still put different bars opposite one another.
+
+In **Check score** and **Compose**, drag a symbol from the top palette, or select it and tap the staff. Place a note within a rest to split that rest at the selected subdivision. Drop articulations directly onto notes. Drag a pitched note vertically for an immediate staff preview. Undo and redo support Ctrl/Cmd+Z, Ctrl+Y and Cmd/Ctrl+Shift+Z. **Reading options** remembers the title and toolbar spacing on this device. On small screens **Library** opens the navigation drawer.
+
+The hosted project shares its database storage allowance across personal libraries. Original PDFs, MusicXML, duplicated scores, trash and edit history all use space. See [current Neon plan limits](https://neon.com/docs/introduction/plans).

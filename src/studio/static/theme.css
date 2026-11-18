@@ -70,3 +70,39 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 
 body:is([data-page=compose],[data-page=review]) #pages .note{touch-action:none;cursor:ns-resize}
 #drag-pitch{position:fixed;transform:translate(-50%,-145%);padding:5px 12px;background:#17213b;color:white;border-radius:8px;pointer-events:none;z-index:65}
+.brand .brand-light{font-family:"Segoe Script","Apple Chancery","Brush Script MT",cursive;font-weight:500}
+.score-heading{padding-block:var(--title-spacing,16px)}
+.workbar{padding-block:var(--tool-spacing,4px);min-height:0}
+.reading-panel label{display:grid;gap:3px}
+#edit-strip{display:flex;align-items:center;gap:5px;padding:5px 12px;background:white;border-bottom:1px solid var(--line);overflow-x:auto;flex-shrink:0}
+#edit-strip[hidden]{display:none}#stamp-tools{display:flex;gap:4px}
+#edit-strip button{min-width:36px;height:36px;background:white;color:var(--ink);border:1px solid var(--line);border-radius:7px;font-size:20px;touch-action:none}
+#edit-strip button[aria-pressed=true]{background:#ffe96a}
+.score-page.source-paper,#reader-surfaces.comparison .score-page.source-paper{box-sizing:border-box;padding:0;min-height:0;overflow:hidden;margin:0 0 18px}
+.score-page.source-paper>svg{width:100%;height:100%;object-fit:contain;position:absolute;inset:0}
+.comparison .pages{max-width:none}
+#invite-url{width:100%}#account-panel summary{cursor:pointer;padding:8px}
+#mobile-nav{display:none}
+@media(max-width:1250px){.volume-control{display:flex}.minor-option:not([hidden]){display:flex}}
+@media(max-width:920px){.tabs{min-width:0;overflow-x:auto}.tab{flex:none}.workbar{gap:4px}.pages{min-width:0}.score-heading>div{min-width:0}.score-heading h1{overflow-wrap:anywhere}}
+@media(max-width:700px){
+  body{display:flex;flex-direction:column;height:100dvh;overflow:hidden}main{height:auto;min-width:0;min-height:0;flex:1}
+  .sidebar{flex:none;min-height:44px;display:block;z-index:20}.sidebar .brand{min-height:32px}
+  #mobile-nav{display:block;float:right}.sidebar>:not(.brand):not(#mobile-nav){display:none}
+  .navigation-open .sidebar{overflow:auto;max-height:65dvh}.navigation-open .sidebar>:not([hidden]):not(.brand):not(#mobile-nav):not(.sidebar-bottom){display:block}
+  .navigation-open .sidebar .score-list{max-height:22vh;overflow:auto}
+  .workbar{min-width:0;flex-wrap:nowrap;padding-inline:8px;gap:6px}.tabs{flex:1;gap:12px}
+  .reading-options summary{white-space:nowrap;font-size:11px}.reading-panel{z-index:32}
+  .score-heading{padding-inline:12px;gap:5px}.score-heading h1{font-size:clamp(16px,5vw,24px);margin:0}
+  .score-heading .eyebrow,.score-heading .muted{margin-block:2px}
+  .topbar{height:auto;min-height:40px}.transport{height:auto;min-height:46px;flex-wrap:wrap;padding:4px 8px;gap:4px 8px}.transport #seek{min-width:32px;flex:1}
+  .volume-control{display:flex}.volume-control input{max-width:68px}.score-scroll,.pages{min-width:0}
+  .workspace{min-height:0;flex:1}.score-scroll{height:auto;min-height:220px;overflow:visible}
+  #reader-surfaces.comparison{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px}
+  .comparison .reader-column-label{font-size:8px;letter-spacing:0;padding:4px;height:auto;min-height:28px}
+  #reader-surfaces:not(.comparison) #pdf-pages{min-width:0}
+  .keyboard-panel{max-height:40dvh;overflow:auto}.keyboard-panel .keyboard{max-width:none}
+  dialog{width:min(96vw,540px);max-height:85dvh;overflow:auto}
+}
+@media(max-height:570px){.score-heading .eyebrow,.score-heading .muted{display:none}.score-heading{padding-block:2px}.topbar{min-height:32px;height:auto}.workspace{min-height:0}}
+@media print{#edit-strip,#mobile-nav,#account-panel{display:none!important}}
