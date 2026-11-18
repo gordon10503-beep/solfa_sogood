@@ -113,7 +113,7 @@ class Library:
         if self.database_url:
             import psycopg
             from psycopg.rows import dict_row
-            with psycopg.connect(self.database_url, row_factory=dict_row) as conn:
+            with psycopg.connect(self.database_url, row_factory=dict_row, connect_timeout=12) as conn:
                 yield PostgresQueries(conn)
         else:
             db = sqlite3.connect(self.path, timeout=30)
@@ -535,6 +535,8 @@ def main():
     password = os.environ.get("STUDIO_PASSWORD")
     if public_host and not (database_url and password):
         parser.error("Hosted Studio requires DATABASE_URL and STUDIO_PASSWORD.")
+    if public_host:
+        print("Initializing hosted Postgres library", flush=True)
     lib = Library(args.data_dir / "library.sqlite3", database_url)
     seed(lib)
     try:
