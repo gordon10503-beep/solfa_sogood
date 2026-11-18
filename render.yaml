@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: solfa-studio
+    runtime: docker
+    region: singapore
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: STUDIO_PASSWORD
+        generateValue: true

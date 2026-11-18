@@ -61,3 +61,12 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 #metro-settings summary::-webkit-details-marker{display:none}
 #metro-settings label{position:absolute;bottom:100%;right:0;display:flex;align-items:center;gap:8px;white-space:nowrap;background:white;border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 5px 16px #17213b22}
 @media(pointer:coarse){#metro-settings summary{min-width:44px;min-height:44px;text-align:center}}
+
+.reading-options{position:relative}
+.reading-options summary,.review-guide summary,#issues summary{cursor:pointer;font-weight:600;padding:8px}
+.reading-panel{position:absolute;z-index:12;right:0;top:100%;width:230px;padding:14px;display:grid;gap:12px;background:white;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px #17213b24}
+#issues details{border-bottom:1px solid var(--line)}
+#issues .issue{display:block;width:100%;text-align:left}
+
+body:is([data-page=compose],[data-page=review]) #pages .note{touch-action:none;cursor:ns-resize}
+#drag-pitch{position:fixed;transform:translate(-50%,-145%);padding:5px 12px;background:#17213b;color:white;border-radius:8px;pointer-events:none;z-index:65}

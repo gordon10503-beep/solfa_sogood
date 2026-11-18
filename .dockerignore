@@ -1,0 +1,6 @@
+*
+!src/
+!src/**
+!requirements-studio.txt
+!Dockerfile
+**/__pycache__/

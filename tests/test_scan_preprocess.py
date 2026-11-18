@@ -46,3 +46,11 @@ def test_mixed_pdf_pages_and_selection(tmp_path):
         pix = doc[1].get_pixmap(colorspace=pymupdf.csGRAY)
         assert correction_angle(Image.frombytes("L",(pix.width,pix.height),pix.samples)) == 0
     assert hashlib.sha256(path.read_bytes()).digest() == before
+
+
+def test_faded_staff_contrast_and_blank_abstention():
+    from src.studio.scan_preprocess import corrected_image
+    faded = staff().point([110 + v // 3 for v in range(256)])
+    corrected = corrected_image(faded)
+    assert corrected is not None and corrected.getextrema() == (0, 255)
+    assert corrected_image(Image.new("L", faded.size, 185)) is None

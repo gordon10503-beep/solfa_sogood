@@ -19,18 +19,26 @@ async function api(path, data) {
 function run(fn) { return async (...args) => { try { await fn(...args); } catch(e) { busy(false); toast(e.message,true); } }; }
 function on(id, event, fn) { $(id).addEventListener(event,run(fn)); }
 async function library() {
-  const result = await api("/api/library"); state.library=result.scores; state.scanner=result.scanner;syncScanJobs(result.scanJobs||[]);
+  const result = await api("/api/library"); state.library=result.scores; state.scanner=result.scanner;
+  if(result.storage==="Neon"){document.querySelector(".sidebar-bottom strong").textContent="Shared workspace";document.querySelector(".sidebar-bottom small").textContent="Score library saved in Neon";document.querySelector(".workspace-label .local-dot").title="Hosted library";document.title="Solfa Studio · Shared music workspace";}
+  syncScanJobs(result.scanJobs||[]);
   $("score-count").textContent=state.library.filter(s=>!s.trashed).length;
   renderLibrary();
 }
 function filteredScores() { const q=$("search").value.toLowerCase();return state.library.filter(s=>!!s.trashed===!!state.trash && (!state.group || s.group===state.group) && `${s.title} ${s.composer} ${s.group}`.toLowerCase().includes(q)); }
+const libraryDate = new Intl.DateTimeFormat(undefined, {dateStyle:"medium", timeStyle:"short"});
+function scoreDates(score){
+  const created = score.created ?? (score.revision===1 ? score.updated : null);
+  const addedLabel = score.sourceFileName ? "Uploaded" : "Added";
+  return `<small>${addedLabel} · ${created ? libraryDate.format(created*1000) : "Not recorded"}</small><small>Updated · ${libraryDate.format(score.updated*1000)}</small>`;
+}
 function renderLibrary() {
   const groups=[...new Set(state.library.filter(s=>!s.trashed).map(s=>s.group).filter(Boolean))].sort();
   $("groups").innerHTML=groups.map(g=>`<button class="group-item ${state.group===g?"selected":""}" data-group="${esc(g)}"><span class="group-dot"></span>${esc(g)}<span>${state.library.filter(s=>!s.trashed && s.group===g).length}</span></button>`).join("");
   $("groups").querySelectorAll("button").forEach(b=>b.onclick=()=>{state.trash=false;state.group=b.dataset.group;showLibrary();renderLibrary();});
   const list=filteredScores();
   $("score-list").innerHTML=list.map(s=>`<button class="score-link ${state.score?.id===s.id?"selected":""}" data-score="${s.id}"><strong>${esc(s.title)}</strong><small>${esc(s.group)} · ${s.origin==="Composition"?"Composition":s.reviewed?"Reviewed":"To review"}</small></button>`).join("") || '<p class="empty-hint">No scores here yet.</p>';
-  $("library-cards").innerHTML=list.map(s=>`<button class="score-card" data-score="${s.id}"><div class="card-art" aria-hidden="true">𝄞 ♩ ♫</div><div class="card-content"><strong>${esc(s.title)}</strong><small>${esc(s.group)} · ${esc(s.origin)}${s.reviewed?" · Reviewed":""}</small></div></button>`).join("") || '<p class="empty-hint">Import a score or start a new composition to fill this space.</p>';
+  $("library-cards").innerHTML=list.map(s=>`<button class="score-card" data-score="${s.id}"><div class="card-art" aria-hidden="true">𝄞 ♩ ♫</div><div class="card-content"><strong>${esc(s.title)}</strong><small>${esc(s.group)} · ${esc(s.origin)}${s.reviewed?" · Reviewed":""}</small>${scoreDates(s)}</div></button>`).join("") || '<p class="empty-hint">Import a score or start a new composition to fill this space.</p>';
   document.querySelectorAll("[data-score]").forEach(b=>{
     const id=b.dataset.score, wrapper=document.createElement('div');wrapper.className='score-item';b.replaceWith(wrapper);wrapper.appendChild(b);
     const menu=document.createElement('button');menu.className='score-more';menu.textContent='⋯';menu.setAttribute('aria-label','Actions for '+state.library.find(s=>s.id===id).title);menu.setAttribute('aria-haspopup','menu');wrapper.appendChild(menu);
@@ -94,6 +102,7 @@ async function openScore(id, preserve=false) {
     for(const [key,value] of Object.entries({x:bounds.x-20,y:bounds.y-20,width:bounds.width+40,height:bounds.height+40,fill:"transparent","pointer-events":"all"}))hit.setAttribute(key,String(value));
     hit.setAttribute("aria-hidden","true");note.insertBefore(hit,note.firstChild);
     const n=result.notes[note.id];note.setAttribute("aria-label",`${result.parts[n.part].name}, bar ${n.measure+1}, ${n.rest?"rest":n.step+n.octave}`);
+    if(n.pitched) bindPitchDrag(note,n);
     note.addEventListener("click",()=>selectNote(note.id));note.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();selectNote(note.id);}});
   });
   }
@@ -104,10 +113,12 @@ async function openScore(id, preserve=false) {
   renderMixer();renderBookmarks();renderIssues();fillComposer();setView(state.view);updateTransport();
   $("reviewed").checked=!!result.meta.reviewed;$("source-btn").disabled=!result.hasSource;
   $("source-btn").textContent=result.hasSource?"View original scan ↗":"No scan attached · MusicXML source";
+  setPianoAction(null);$("repitch-key").disabled=true;$("insert-key").disabled=true;
   $("apply-note").disabled=true;$("note-selection").textContent="Select a note on the score";
   $("score-scroll").scrollTop=oldScroll;renderLibrary();busy(false);await readerFormat();
 }
 function setView(view) {
+  if(view!=="compose")setPianoAction(null);
   state.view=view;
   document.body.dataset.page=view;
   document.querySelector(".inspector").hidden=view==="read";
@@ -116,12 +127,48 @@ function setView(view) {
   document.querySelectorAll("[data-view]").forEach(b=>{b.classList.toggle("active",b.dataset.view===view);b.setAttribute("aria-selected",String(b.dataset.view===view));});
   ["read","compose","review"].forEach(v=>$(v+"-panel").hidden=(v==="read" ? view!=="practice" : v!==view));
 }
+function bindPitchDrag(note, n) {
+  let drag;
+  const steps = "CDEFGAB";
+  note.addEventListener("pointerdown", event => {
+    if (event.button !== 0 || !["review","compose"].includes(state.view)) return;
+    const staff = note.closest(".staff");
+    const lines = staff ? [...staff.querySelectorAll(":scope > path")].map(path => path.getBoundingClientRect()).filter(box => box.width > 20 && box.height < 2) : [];
+    const halfSpace = lines.length >= 2 ? Math.abs(lines[1].top - lines[0].top)/2 : 0;
+    if (!halfSpace) return;
+    drag = {start:event.clientY, halfSpace, pointer:event.pointerId};
+    note.setPointerCapture(event.pointerId);
+  });
+  note.addEventListener("pointermove", event => {
+    if (!drag || event.pointerId !== drag.pointer) return;
+    const delta = drag.start-event.clientY;
+    if (!drag.moved && Math.abs(delta) < 5) return;
+    drag.moved = true;
+    const pitch = Math.min(62, Math.max(0, 7*n.octave+steps.indexOf(n.step)+Math.round(delta/drag.halfSpace)));
+    drag.step = steps[pitch%7]; drag.octave = Math.floor(pitch/7);
+    const label = $("drag-pitch");
+    label.textContent = drag.step + ({"-2":"𝄫","-1":"♭","1":"♯","2":"𝄪"}[n.alter] || "") + drag.octave;
+    label.hidden = false; label.style.left = event.clientX+"px"; label.style.top = event.clientY+"px";
+  });
+  note.addEventListener("pointercancel", () => {drag=null; $("drag-pitch").hidden=true;});
+  note.addEventListener("pointerup", run(async event => {
+    if (!drag || event.pointerId !== drag.pointer) return;
+    const target = drag;
+    drag = null; $("drag-pitch").hidden=true;
+    if (!target.moved || (target.step===n.step && target.octave===n.octave)) return;
+    await edit("note", {nid:n.id, step:target.step, octave:target.octave, alter:n.alter});
+    selectNote(n.id);
+  }));
+}
+
 function selectNote(id) {
   const n=state.score.notes[id];if(!n)return;
   document.querySelectorAll(".selected-note").forEach(el=>el.classList.remove("selected-note"));
   document.querySelectorAll("[data-symbol]").forEach(b=>b.disabled=!n.pitched && b.dataset.symbol!=="fermata");
   $(id)?.classList.add("selected-note");state.selected=id;state.currentMeasure=n.measure;
   $("note-details").open=true;
+  $("repitch-key").disabled=!n.pitched;
+  $("insert-key").disabled=false;
   $("note-step").value=n.step;$("note-alter").value=n.alter;$("note-octave").value=n.octave;$("note-lyric").value=n.lyric;
   $("note-selection").textContent=`${state.score.parts[n.part].name} · bar ${n.measure+1} · ${n.duration} quarter beats`;
   $("apply-note").disabled=!n.pitched;$("compose-part").value=n.part;fillBars(n.measure);setView("compose");
@@ -132,9 +179,29 @@ function fillBars(index=0) {
   $("compose-bar").innerHTML=p.measures.map((m,i)=>`<option value="${i}">${esc(m.number)}</option>`).join("");
   $("compose-bar").value=Math.min(index,p.measures.length-1);updateCapacity();
 }
+function rhythmText(m) {
+  const fmt = value => Number(value.toFixed(3));
+  const delta = Math.abs(m.remaining) < 0.00001 ? "complete" :
+    Math.abs(fmt(m.remaining)) + (m.remaining > 0 ? " short" : " over");
+  const written = m.beats + "/" + m.beatType;
+  const meter = m.meterKnown ? written : written + " assumed";
+  const suggestion = m.possibleMeter && (!m.meterKnown || m.possibleMeter !== written)
+    ? " · duration fits " + m.possibleMeter : "";
+  return meter + " · " + fmt(m.covered) + " of " + fmt(m.length) + " quarter beats · " + delta + suggestion;
+}
+function renderRhythmReport(index) {
+  const parts=state.score.parts, field=$("rhythm-position");
+  field.max=Math.max(...parts.map(part=>part.measures.length));
+  field.value=Math.max(1,Math.min(Number(field.max),index+1));
+  $("rhythm-report").innerHTML=parts.map(part=>{
+    const bar=part.measures[Number(field.value)-1];
+    return '<p><strong>'+esc(part.name)+'</strong><br>'+(bar?esc(rhythmText(bar)):"Bar missing")+'</p>';
+  }).join("");
+}
+on("rhythm-position","change",()=>renderRhythmReport(Math.max(0,Number($("rhythm-position").value)-1)));
 function updateCapacity() {
   if(!state.score)return;const m=state.score.parts[Number($("compose-part").value)].measures[Number($("compose-bar").value)];
-  $("bar-capacity").textContent=`${m.beats}/${m.beatType} · This bar needs ${m.length} quarter beats.`;
+  $("bar-capacity").textContent=rhythmText(m);
 }
 function renderMixer() {
   $("mixer").innerHTML=state.score.parts.map((p,i)=>{const m=state.mixer[i];return `<div class="mixer-part"><div class="mixer-part-title"><div class="part-title"><span class="part-badge">${esc(p.name.charAt(0))}</span>${esc(p.name)}</div><div class="mix-switches"><button class="${m.mute?"on":""}" data-mute="${i}" aria-pressed="${m.mute}" title="Mute ${esc(p.name)}">M</button><button class="${m.solo?"on":""}" data-solo="${i}" aria-pressed="${m.solo}" title="Solo ${esc(p.name)}">S</button></div></div><div class="sounds">${sounds.map(s=>`<button class="sound-chip ${m.sounds.includes(s)?"on":""}" data-sound="${s}" data-part="${i}" aria-pressed="${m.sounds.includes(s)}">${s}</button>`).join("")}</div><label class="mixer-volume">−<input type="range" value="${m.volume}" min="0" max="1" step="0.01" data-volume="${i}" aria-label="${esc(p.name)} volume">＋</label></div>`;}).join("");
@@ -150,7 +217,7 @@ function queueMeta(meta,id=state.score?.id) {
     $("save-status").textContent="Saving…";
     const r=await api("/api/meta",{id,revision:state.score.revision,meta});
     if(state.score?.id===id){state.score.revision=r.revision;state.score.meta=r.meta;}
-    $("save-status").textContent="● Saved locally";await library();
+    $("save-status").textContent="● Saved";await library();
   }).catch(e=>{$("save-status").textContent="Not saved";toast(e.message,true);});
   return state.saving;
 }
@@ -163,7 +230,7 @@ async function edit(action,values,extra={}) {
   pause();await state.saving;busy(true,"Saving and engraving…");
   const id=state.score.id;
   await api("/api/edit",{id,revision:state.score.revision,action,values,...extra});
-  await library();await openScore(id,true);toast("Saved locally. Use Undo to restore the previous version.");
+  await library();await openScore(id,true);toast("Saved. Use Undo to restore the previous version.");
 }
 function renderBookmarks() {
   const bookmarks=state.score.meta.bookmarks||[];
@@ -179,10 +246,23 @@ function jumpBar(index,part=0) {
   updateTransport();
 }
 function renderIssues() {
+  renderRhythmReport(state.currentMeasure);
   const issues=state.score.issues;$("review-note").textContent=state.score.meta.reviewNote||"";$("issue-count").textContent=issues.length;$("review-pill").textContent=state.score.meta.reviewed?"REVIEWED":"TO REVIEW";
-  $("issues").innerHTML=issues.length?issues.map((i,n)=>`<button class="issue" data-issue="${n}"><strong>${i.part!==undefined?`${esc(state.score.parts[i.part].name)} · bar ${i.measure+1}`:"PLAYBACK NOTE"}</strong>${esc(i.message)}</button>`).join(""):'<p class="empty-hint">✓ No structural problems found.<br>Pitch and symbol accuracy still need a visual check.</p>';
+  const bars = new Map(), notices = [];
+  issues.forEach((issue, index) => {
+    if (issue.measure === undefined) {
+      notices.push('<p class="hint">' + esc(issue.message) + '</p>');
+      return;
+    }
+    if (!bars.has(issue.measure)) bars.set(issue.measure, []);
+    const action = issue.code === "missing-meter" ? "Check meter" : "Open bar";
+    bars.get(issue.measure).push(`<button class="issue" data-issue="${index}"><strong>${esc(state.score.parts[issue.part].name)} · ${action}</strong>${esc(issue.message)}</button>`);
+  });
+  const groups = [...bars].sort(([a], [b]) => a-b).map(([bar, entries], index) =>
+    `<details ${index === 0 ? "open" : ""}><summary>Bar ${bar+1} · ${entries.length} to check</summary>${entries.join("")}</details>`);
+  $("issues").innerHTML = [...notices, ...groups].join("") || '<p class="empty-hint">No structural warnings. Compare pitches and symbols with the original.</p>';
   if(state.score.engravingLog) { const details=document.createElement("details");details.innerHTML='<summary class="hint">Engraver notices</summary>';const p=document.createElement("p");p.className="hint";p.textContent=state.score.engravingLog;details.appendChild(p);$("issues").appendChild(details); }
-  $("issues").querySelectorAll("[data-issue]").forEach(b=>b.onclick=()=>{const i=issues[+b.dataset.issue];if(i.measure!==undefined){jumpBar(i.measure,i.part);$("compose-part").value=i.part;fillBars(i.measure);$("meter-bar").value=i.measure+1;if(!i.code){setView("compose");toast("This part and bar are selected. Click a note to change pitch, or use the bar composer to replace its rhythm.");}}});
+  $("issues").querySelectorAll("[data-issue]").forEach(b=>b.onclick=()=>{const i=issues[+b.dataset.issue];if(i.measure!==undefined){jumpBar(i.measure,i.part);renderRhythmReport(i.measure);$("compose-part").value=i.part;fillBars(i.measure);$("meter-bar").value=i.measure+1;if(i.code==="missing-meter"){$("meter-bar").closest("details").open=true;$("meter-beats").focus();}else{setView("compose");$("phrase").closest("details").open=true;toast("This part and bar are selected. Click a note to change pitch, or use the bar composer to replace its rhythm.");}}});
 }
 let textCallback;
 function textDialog(title,label,value,callback) { $("text-title").textContent=title;$("text-label").textContent=label;$("text-value").value=value;textCallback=callback;$("text-dialog").showModal();$("text-value").focus();$("text-value").select(); }
@@ -376,16 +456,44 @@ function makeKeyboard() {
   $("keyboard").innerHTML=keys.join("");
   $("keyboard").querySelectorAll("button").forEach(b=>b.onclick=run(()=>keyboardNote(+b.dataset.midi)));
 }
+function setPianoAction(action) {
+  state.pianoAction=action;
+  $("piano-action").textContent=action==="note"?"Play the corrected pitch":action==="insert-note"?"Play a missing note":"Piano";
+  $("insert-length-field").hidden=action!=="insert-note";
+}
+for(const [button,action] of [["repitch-key","note"],["insert-key","insert-note"]]){
+  on(button,"click",()=>{
+    if(!state.selected)return;
+    setPianoAction(action);
+    $("keyboard-entry").checked=false;
+    toggleKeyboard(true);
+    const key=document.querySelector('[data-midi="'+state.score.notes[state.selected].midi+'"]');
+    if(key)$("keyboard-scroll").scrollLeft=key.offsetLeft-$("keyboard-scroll").clientWidth/2;
+  });
+}
 async function keyboardNote(midi) {
+  const anchor=state.selected, action=state.view==="compose" && state.pianoAction;
+  if(action && (!anchor || state.pianoEditing))return;
+  if(action)state.pianoEditing=true;
+  try {
   await audioReady();const transposed=midi;
   await StudioSamples.load(state.audio,"Piano",[transposed]);StudioSamples.play(state.audio,state.master,state.nodes,transposed,.55,state.audio.currentTime,"Piano",.85);const b=document.querySelector(`[data-midi="${midi}"]`);b?.classList.add("pressed");setTimeout(()=>b?.classList.remove("pressed"),250);
-  if(state.view==="compose" && $("keyboard-entry").checked) {
+  if(action){
+    const written=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"][midi%12];
+    const values={nid:anchor,step:written[0],alter:Number(written.length===2),octave:Math.floor(midi/12)-1};
+    const n=state.score.notes[anchor];
+    if(action==="insert-note")values.unit=$("insert-length").value;
+    await edit(action,values);
+    selectNote(action==="insert-note" ? `ss-p${n.part}-m${n.measure}-n${n.index+1}` : anchor);
+    setPianoAction(action);
+  } else if(state.view==="compose" && $("keyboard-entry").checked) {
     const names=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
     addPhrase(`${names[transposed%12]}${Math.floor(transposed/12)-1}`);
   }
+  } finally { if(action)state.pianoEditing=false; }
 }
 function addPhrase(pitch) { $("phrase").value=[$("phrase").value.trim(),`${pitch}/${$("entry-duration").value}`].filter(Boolean).join(" ");renderDraft(); }
-function toggleKeyboard(force) { $("keyboard-panel").hidden=force===undefined?!$("keyboard-panel").hidden:!force;$("keyboard-btn").setAttribute("aria-expanded",String(!$("keyboard-panel").hidden)); if(!$("keyboard-panel").hidden)$("keyboard-scroll").scrollLeft=23*44; }
+function toggleKeyboard(force) { $("keyboard-panel").hidden=force===undefined?!$("keyboard-panel").hidden:!force;$("keyboard-btn").setAttribute("aria-expanded",String(!$("keyboard-panel").hidden)); if(!$("keyboard-panel").hidden)$("keyboard-scroll").scrollLeft=23*44;else setPianoAction(null); }
 async function importFile(file,options={}) {
   if(!file)return;if(file.size>40*1024*1024)throw new Error("Choose a file smaller than 40 MB.");
   const scan=/\.(pdf|png|jpe?g|tiff?)$/i.test(file.name);
@@ -427,7 +535,7 @@ on("print-btn","click",()=>{
   window.print();
 });
 on("compose-part","change",()=>fillBars(0));on("compose-bar","change",updateCapacity);
-on("entry-keyboard","click",()=>{toggleKeyboard(true);$("keyboard-entry").checked=true;});
+on("entry-keyboard","click",()=>{setPianoAction(null);toggleKeyboard(true);$("keyboard-entry").checked=true;});
 on("entry-rest","click",()=>addPhrase("R"));
 on("entry-back","click",()=>{$("phrase").value=$("phrase").value.trim().split(/\s+/).slice(0,-1).join(" ");renderDraft();});
 on("note-form","submit",async e=>{e.preventDefault();if(!state.selected)return;await edit("note",{nid:state.selected,step:$("note-step").value,alter:+$("note-alter").value,octave:+$("note-octave").value,lyric:$("note-lyric").value});});
@@ -508,6 +616,7 @@ async function manageMeta(id,meta){
   await state.saving;await library();const item=state.library.find(s=>s.id===id);
   const result=await api('/api/meta',{id,revision:item.revision,meta});
   for(const [field,value] of Object.entries(meta)){
+    if(field==="title" && result.meta?.title && result.meta.title!==value){toast("Saved as "+result.meta.title);continue;}
     if(result.meta?.[field]!==value)throw new Error('The server did not save this change. Close the old Studio server, start Studio again, then refresh this page.');
   }
   if(state.score?.id===id){state.score.revision=result.revision;state.score.meta=result.meta;state.score.title=result.meta.title;$('score-title').textContent=result.meta.title;$('score-eyebrow').textContent=result.meta.group;}
@@ -653,6 +762,6 @@ function updateImportMode(){
   const paired=Boolean($('companion-xml').files.length);
   $('scan-engine-settings').hidden=paired;
   $('scan-pages').closest('label').hidden=paired;
-  $('scan-submit').textContent=paired?'Import paired score':'Start scan';
+  $('scan-submit').textContent=paired?'Import paired score':state.scanner?'Start scan':'Save original only';
 }
 on('companion-xml','change',updateImportMode);

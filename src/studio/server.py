@@ -1,7 +1,8 @@
-"""Loopback-only server. Scores, scans and undo history stay in local SQLite."""
+"""Score workspace backed by local SQLite or hosted PostgreSQL."""
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import base64
 import functools
 import hashlib
@@ -27,7 +28,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from .document import (MAX_BYTES, append_bar, edit_symbol, move_part, rename_part, edit_note, edit_meter, engrave, inspect,
+from .document import (MAX_BYTES, append_bar, edit_symbol, move_part, rename_part, edit_note, insert_after_note, edit_meter, engrave, inspect,
                        new_score, read_xml, replace_bar, xml_bytes)
 
 from PIL import Image
@@ -67,22 +68,67 @@ def audiveris_path():
     ] if p.is_file()), None)
 
 
-class Library:
-    def __init__(self, path):
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.connect() as db:
-            db.executescript("""
-                CREATE TABLE IF NOT EXISTS scores (
-                    id TEXT PRIMARY KEY, xml BLOB NOT NULL, meta TEXT NOT NULL,
-                    source BLOB, source_type TEXT, updated REAL NOT NULL, revision INTEGER NOT NULL DEFAULT 1);
-                CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, score TEXT, xml BLOB, meta TEXT);
-            """)
+def available_title(db, requested, exclude=None):
+    title = requested.strip() or "Untitled score"
+    occupied = {json.loads(row["meta"])["title"].strip().casefold()
+                for row in db.execute("SELECT meta FROM scores WHERE id <> ?", (exclude or "",))}
+    if title.casefold() not in occupied:
+        return title
+    stem, extension = os.path.splitext(title)
+    if extension.lower() not in {".pdf", ".musicxml", ".mxl", ".xml", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}:
+        stem, extension = title, ""
+    stem = re.sub(r" \(\d+\)$", "", stem)
+    number = 1
+    while f"{stem} ({number}){extension}".casefold() in occupied:
+        number += 1
+    return f"{stem} ({number}){extension}"
 
+
+class PostgresQueries:
+    """The shared library queries use SQLite-style parameter markers."""
+    def __init__(self, connection):
+        self.connection = connection
+
+    def execute(self, query, params=()):
+        return self.connection.execute(query.replace("?", "%s"), params)
+
+
+class Library:
+    def __init__(self, path, database_url=None):
+        self.path = Path(path)
+        self.database_url = database_url
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        blob = "BYTEA" if database_url else "BLOB"
+        identity = "BIGSERIAL" if database_url else "INTEGER"
+        with self.connect() as db:
+            db.execute(f"""CREATE TABLE IF NOT EXISTS scores (
+                id TEXT PRIMARY KEY, xml {blob} NOT NULL, meta TEXT NOT NULL,
+                source {blob}, source_type TEXT, updated DOUBLE PRECISION NOT NULL,
+                revision INTEGER NOT NULL DEFAULT 1)""")
+            db.execute(f"""CREATE TABLE IF NOT EXISTS history (
+                id {identity} PRIMARY KEY, score TEXT, xml {blob}, meta TEXT)""")
+
+    @contextmanager
     def connect(self):
-        db = sqlite3.connect(self.path, timeout=30)
-        db.row_factory = sqlite3.Row
-        return db
+        if self.database_url:
+            import psycopg
+            from psycopg.rows import dict_row
+            with psycopg.connect(self.database_url, row_factory=dict_row) as conn:
+                yield PostgresQueries(conn)
+        else:
+            db = sqlite3.connect(self.path, timeout=30)
+            db.row_factory = sqlite3.Row
+            try:
+                with db:
+                    yield db
+            finally:
+                db.close()
+
+    def lock_writes(self, db):
+        if self.database_url:
+            db.execute("LOCK TABLE scores IN SHARE ROW EXCLUSIVE MODE")
+        else:
+            db.execute("BEGIN IMMEDIATE")
 
     def list(self):
         with self.connect() as db:
@@ -104,13 +150,16 @@ class Library:
         meta = {"title": info["title"], "composer": info["composer"], "group": "Ungrouped",
                 "bookmarks": [], "reviewed": False, "origin": "MusicXML", **(meta or {})}
         with self.connect() as db:
+            self.lock_writes(db)
+            meta["title"] = available_title(db, meta["title"])
+            meta["created"] = time.time()
             db.execute("INSERT INTO scores VALUES (?,?,?,?,?,?,1)",
-                       (sid, xml_bytes(root), json.dumps(meta), source, source_type, time.time()))
+                       (sid, xml_bytes(root), json.dumps(meta), source, source_type, meta["created"]))
         return sid
 
     def update(self, sid, revision, data=None, metadata=None, undo=False):
         with self.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
+            self.lock_writes(db)
             row = db.execute("SELECT * FROM scores WHERE id=?", (sid,)).fetchone()
             if row is None: raise ValueError("Score not found.")
             if row["revision"] != revision:
@@ -131,6 +180,10 @@ class Library:
                     meta.update(title=meta.get("title", info["title"]), composer=info["composer"], reviewed=False)
                 # Keep a bounded, persistent undo history per score.
                 db.execute("DELETE FROM history WHERE score=? AND id NOT IN (SELECT id FROM history WHERE score=? ORDER BY id DESC LIMIT 50)", (sid, sid))
+            if row["revision"] == 1:
+                meta.setdefault("created", row["updated"])
+            if undo or (metadata and "title" in metadata):
+                meta["title"] = available_title(db, meta["title"], sid)
             db.execute("UPDATE scores SET xml=?,meta=?,updated=?,revision=revision+1 WHERE id=?",
                        (data if data is not None else row["xml"], json.dumps(meta), time.time(), sid))
         return self.get(sid)
@@ -162,6 +215,8 @@ class StudioServer(ThreadingHTTPServer):
 
     def __init__(self, address, library):
         super().__init__(address, Handler)
+        self.public_host = None
+        self.workspace_password = None
         self.library, self.token, self.jobs = library, secrets.token_urlsafe(32), {}
 
 
@@ -200,16 +255,34 @@ class Handler(BaseHTTPRequestHandler):
     def allowed(self):
         port = self.server.server_address[1]
         allowed = {f"127.0.0.1:{port}", f"localhost:{port}"}
+        if self.server.public_host:
+            return self.headers.get("Host") == self.server.public_host and self.headers.get("Origin") in (
+                None, "https://" + self.server.public_host)
         return self.headers.get("Host") in allowed and (
             not self.headers.get("Origin") or self.headers["Origin"] in {f"http://{h}" for h in allowed})
 
+    def authenticated(self):
+        if self.server.public_host is None:
+            return True
+        expected = base64.b64encode(("studio:" + self.server.workspace_password).encode())
+        if secrets.compare_digest(self.headers.get("Authorization", "").encode(), b"Basic " + expected):
+            return True
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="Solfa Studio", charset="UTF-8"')
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        return False
+
     def do_GET(self):
+        if self.path == "/healthz":
+            return self.respond({"status": "ok"})
+        if not self.authenticated(): return
         if not self.allowed(): return self.respond({"error": "Local access only."}, status=403)
         path = urlparse(self.path)
         try:
             if path.path == "/api/library":
                 return self.respond({"scores": self.server.library.list(), "scanner": bool(audiveris_path()),
-                                     "storage": str(self.server.library.path), "build": "2026-11-11-lyrics",
+                                     "storage": "Neon" if self.server.public_host else str(self.server.library.path), "build": "2026-11-18-scan-review",
                                      "scanJobs": [{"job": job, **scan_status(self.server, job)} for job in list(self.server.jobs)]})
             if path.path.startswith("/api/job/"):
                 return self.respond(scan_status(self.server, path.path.split("/")[-1]))
@@ -253,6 +326,7 @@ class Handler(BaseHTTPRequestHandler):
             self.respond({"error": "Could not process this score. Check its MusicXML structure."}, status=422)
 
     def do_POST(self):
+        if not self.authenticated(): return
         if not self.allowed() or self.headers.get("X-Studio-Token") != self.server.token:
             return self.respond({"error": "Reload the local app to continue."}, status=403)
         try:
@@ -304,7 +378,7 @@ class Handler(BaseHTTPRequestHandler):
             row = lib.get(sid)
             if route == "/api/duplicate":
                 meta = dict(row["meta"])
-                meta.update(title=meta["title"] + " (copy)", trashed=False)
+                meta.update(trashed=False)
                 return self.respond({"id": lib.add(row["xml"], meta, row["source"], row["source_type"])})
             if route == "/api/meta":
                 result = lib.update(sid, revision, metadata=payload["meta"])
@@ -313,6 +387,7 @@ class Handler(BaseHTTPRequestHandler):
                 action = payload["action"]
                 metadata = None
                 if action == "note": data = edit_note(row["xml"], **payload["values"])
+                elif action == "insert-note": data = insert_after_note(row["xml"], **payload["values"])
                 elif action == "symbol": data = edit_symbol(row["xml"], **payload["values"])
                 elif action == "move-part":
                     values = payload["values"]
@@ -369,7 +444,13 @@ def scan(server, job, command, data, ext, sid=None, options=None):
                            stdout=log, stderr=subprocess.STDOUT, timeout=1200, check=True, **flags)
             books = list(folder.rglob("*.omr"))
             if not books: raise ValueError("Audiveris did not produce a score book. Inspect the recognition log.")
-            if options.get("layout", "auto") != "auto": repair_satb_book(books[0], options["layout"])
+            layout_warning = None
+            if options.get("layout", "auto") != "auto":
+                try:
+                    repair_satb_book(books[0], options["layout"])
+                except ValueError as exc:
+                    layout_warning = f"Used automatic grouping. {exc}"
+                    print(layout_warning, file=log)
             exported = []
             progress(2, "Exporting recognized notation")
             for _ in range(2):
@@ -394,10 +475,10 @@ def scan(server, job, command, data, ext, sid=None, options=None):
         else:
             # Scan completion must not overwrite concurrent annotation edits.
             with server.library.connect() as db:
-                db.execute("BEGIN IMMEDIATE")
+                server.library.lock_writes(db)
                 row = db.execute("SELECT meta FROM scores WHERE id=?", (sid,)).fetchone()
-                meta = json.loads(row["meta"]);meta.update(playbackReady=True, reviewed=False)
-                db.execute("UPDATE scores SET xml=?,meta=?,revision=revision+1 WHERE id=?", (xml_bytes(read_xml(output)),json.dumps(meta),sid))
+                meta = json.loads(row["meta"]);meta.update(playbackReady=True, reviewed=False, reviewNote=layout_warning or "")
+                db.execute("UPDATE scores SET xml=?,meta=?,updated=?,revision=revision+1 WHERE id=?", (xml_bytes(read_xml(output)),json.dumps(meta),time.time(),sid))
         progress(4, "Scan ready · check the result against the original", status="done", id=sid, finished=time.time())
     except Exception as exc:
         progress(server.jobs[job].get("stage", 0), "Scanning failed · your original is still available", status="error",
@@ -418,7 +499,7 @@ def start_or_reuse(port, library, open_browser=True):
                 is_studio = response.headers.get("Server", "").startswith("SolfaStudio/")
                 info = json.load(response)
             same_library = Path(info.get("storage", "")).resolve() == library.path.resolve()
-            if is_studio and same_library and info.get("build") != "2026-11-11-lyrics":
+            if is_studio and same_library and info.get("build") != "2026-11-18-scan-review":
                 print("An older Studio is running; opening the updated version on the next port.", flush=True)
                 return start_or_reuse(port + 1, library, open_browser)
             if is_studio and same_library:
@@ -440,17 +521,26 @@ def main():
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--data-dir", type=Path, default=ROOT / "data")
     args = parser.parse_args()
-    lib = Library(args.data_dir / "library.sqlite3")
+    public_host = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+    database_url = os.environ.get("DATABASE_URL") if public_host else None
+    password = os.environ.get("STUDIO_PASSWORD")
+    if public_host and not (database_url and password):
+        parser.error("Hosted Studio requires DATABASE_URL and STUDIO_PASSWORD.")
+    lib = Library(args.data_dir / "library.sqlite3", database_url)
     seed(lib)
     try:
-        server = start_or_reuse(args.port, lib, open_browser=not args.no_browser)
+        if public_host:
+            server = StudioServer(("0.0.0.0", int(os.environ.get("PORT", 10000))), lib)
+            server.public_host, server.workspace_password = public_host, password
+        else:
+            server = start_or_reuse(args.port, lib, open_browser=not args.no_browser)
     except (RuntimeError, OSError) as exc:
         parser.exit(1, f"Could not start Studio: {exc}\n")
     if server is None:
         return
     url = f"http://127.0.0.1:{server.server_address[1]}"
     print(f"Solfa Studio: {url}\nLibrary: {lib.path}\nPress Ctrl+C to stop.", flush=True)
-    if not args.no_browser: webbrowser.open(url)
+    if not args.no_browser and not public_host: webbrowser.open(url)
     try: server.serve_forever()
     except KeyboardInterrupt: pass
     finally: server.server_close()

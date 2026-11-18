@@ -73,19 +73,36 @@ def duration_type(duration):
     return None
 
 
+def bar_rhythm(intervals, expected, beat_type):
+    """Count occupied quarter beats once across simultaneous voices and chords."""
+    covered, end = 0., 0.
+    for start, stop in sorted(intervals):
+        covered += max(0., stop - max(start, end))
+        end = max(end, stop)
+    suggested = None
+    for unit in dict.fromkeys((beat_type, 4, 8, 16, 32)):
+        count = covered * unit / 4
+        if 1 <= round(count) <= 32 and abs(count - round(count)) < 1e-5:
+            suggested = f"{round(count)}/{unit}"
+            break
+    return {"covered": covered, "remaining": expected - covered, "possibleMeter": suggested}
+
+
 def inspect(root, mode="movable", minor_do=False):
     names = {p.get("id"): p.findtext("part-name", p.get("id"))
              for p in root.findall("part-list/score-part")}
     parts, notes, issues = [], {}, []
     for pi, part in enumerate(root.findall("part")):
-        if part.find("measure/attributes/time") is None:
+        if not part.findall("measure") or part.findall("measure")[0].find("attributes/time") is None:
             issues.append({"part": pi, "measure": 0, "code": "missing-meter", "message": "Opening time signature was not recognized. The app currently assumes 4/4. Check the printed meter before correcting bar lengths."})
         divisions, beats, beat_type, key = 1., 4, 4, KeySignature(0)
         transpositions = {"1": 0}
         measures = []
+        meter_known = False
         for mi, measure in enumerate(part.findall("measure")):
             cursor, last_start, extent = 0., 0., 0.
             voices, tempos = {}, []
+            intervals = []
             ni = 0
             for el in measure:
                 if el.tag == "attributes":
@@ -93,6 +110,7 @@ def inspect(root, mode="movable", minor_do=False):
                     if divisions <= 0:
                         raise ValueError("MusicXML divisions must be positive.")
                     if el.find("time/beats") is not None:
+                        meter_known = True
                         beats = sum(int(x) for x in el.findtext("time/beats").split("+"))
                         beat_type = int(el.findtext("time/beat-type"))
                     if beat_type <= 0 or beats <= 0:
@@ -126,7 +144,9 @@ def inspect(root, mode="movable", minor_do=False):
                         last_start = start
                         if not grace:
                             cursor += dur
-                    extent = max(extent, start + dur)
+                    if not grace and dur > 0:
+                        intervals.append((start, start + dur))
+                        extent = max(extent, start + dur)
                     voice = el.findtext("voice", "1")
                     voices[voice] = max(voices.get(voice, 0), start + dur)
                     pitch = el.find("pitch")
@@ -175,6 +195,7 @@ def inspect(root, mode="movable", minor_do=False):
                 issues.append({"part": pi, "measure": mi, "message": f"Short bar: {extent:g} quarter beats; expected {expected:g}. Check pickup or missing notes."})
             measures.append({"number": measure.get("number", str(mi + 1)), "beats": beats,
                              "beatType": beat_type, "length": expected, "divisions": divisions,
+                             "meterKnown": meter_known, **bar_rhythm(intervals, expected, beat_type),
                              "fifths": key.fifths, "mode": key.mode, "extent": extent,
                              "implicit": measure.get("implicit") == "yes", "tempos": tempos})
         parts.append({"id": part.get("id"), "name": names.get(part.get("id"), f"Part {pi+1}"), "measures": measures})
@@ -339,7 +360,7 @@ def new_score(title="Untitled composition", composer="", template="satb", bars=8
     return xml_bytes(root)
 
 
-def edit_note(data, nid, step, alter, octave, lyric):
+def edit_note(data, nid, step, alter, octave, lyric=None):
     root = read_xml(data)
     info = inspect(root)
     if nid not in info["notes"]:
@@ -358,6 +379,8 @@ def edit_note(data, nid, step, alter, octave, lyric):
     child(pitch, "octave", octave)
     for accidental in note.findall("accidental"):
         note.remove(accidental)
+    if lyric is None:
+        return xml_bytes(root)
     existing = note.find("lyric")
     if existing is not None:
         text = existing.find("text")
@@ -365,6 +388,49 @@ def edit_note(data, nid, step, alter, octave, lyric):
         text.text = lyric[:500]
     elif lyric:
         child(child(note, "lyric", number="1"), "text", lyric[:500])
+    return xml_bytes(root)
+
+
+def insert_after_note(data, nid, step, alter, octave, unit):
+    """Fill missing beats while retaining the existing scanned notes and lyrics."""
+    root = read_xml(data)
+    info = inspect(root)
+    anchor = info["notes"].get(nid)
+    if anchor is None:
+        raise ValueError("Select a note in the incomplete bar.")
+    if step not in tuple("CDEFGAB") or alter not in (-2, -1, 0, 1, 2) or not 0 <= octave <= 8:
+        raise ValueError("Choose a valid pitch.")
+    lengths = {"whole": 4, "half": 2, "quarter": 1, "eighth": .5, "16th": .25}
+    if unit not in lengths:
+        raise ValueError("Choose a note length.")
+    pi, mi = anchor["part"], anchor["measure"]
+    bar = root.findall("part")[pi].findall("measure")[mi]
+    notes = bar.findall("note")
+    if (any(bar.find(tag) is not None for tag in ("backup", "forward"))
+            or len({(n.findtext("staff","1"), n.findtext("voice","1")) for n in notes}) != 1
+            or any(n.find(tag) is not None for n in notes for tag in
+                   ("chord", "grace", "time-modification", "beam", "tie", "notations/slur", "notations/tied"))
+            or any(el.tag == "attributes" for el in list(bar)[list(bar).index(notes[0])+1:])):
+        raise ValueError("This bar has linked notation or multiple voices. Use the MusicXML editor for insertion.")
+    measure = info["parts"][pi]["measures"][mi]
+    beats = lengths[unit]
+    if measure["extent"] + beats > measure["length"] + 1e-6:
+        raise ValueError("That note exceeds the remaining beats. Choose a shorter length.")
+    ticks = beats * measure["divisions"]
+    if not ticks.is_integer():
+        raise ValueError("This duration is smaller than the score’s timing resolution.")
+    new = ET.Element("note")
+    pitch = child(new, "pitch")
+    child(pitch, "step", step)
+    if alter:
+        child(pitch, "alter", alter)
+    child(pitch, "octave", octave)
+    child(new, "duration", int(ticks))
+    child(new, "voice", anchor["voice"])
+    child(new, "type", unit)
+    if notes[anchor["index"]].find("staff") is not None:
+        child(new, "staff", anchor["staff"])
+    bar.insert(list(bar).index(notes[anchor["index"]]) + 1, new)
     return xml_bytes(root)
 
 

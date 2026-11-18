@@ -309,7 +309,7 @@ def test_local_http_import_edit_export_and_origin_checks(tmp_path):
         assert result["title"] == "Round trip"
         copy_id = json.load(request("/api/duplicate", {"id": sid, "revision": 1}))["id"]
         assert copy_id != sid
-        assert json.load(request(f"/api/score/{copy_id}"))["title"] == "Round trip (copy)"
+        assert json.load(request(f"/api/score/{copy_id}"))["title"] == "Round trip (1)"
         json.load(request("/api/meta", {"id": copy_id, "revision": 1, "meta": {"title": "Renamed", "group": "Concert", "trashed": True}}))
         copied = server.library.get(copy_id)
         assert copied["meta"]["trashed"] and copied["meta"]["group"] == "Concert"
@@ -420,3 +420,37 @@ def test_move_part_preserves_music_and_definition_order():
     expected = [parts[1], parts[0], *parts[2:]]
     assert [ET.tostring(p) for p in moved.findall("part")] == [ET.tostring(p) for p in expected]
     assert [p.get("id") for p in moved.findall("part-list/score-part")] == [p.get("id") for p in expected]
+
+def test_filename_collisions_and_creation_time(tmp_path):
+    lib = Library(tmp_path / "names.sqlite3")
+    meta = {"title":"Choir.pdf", "sourceFileName":"Choir.pdf"}
+    ids = [lib.add(melody(), meta) for _ in range(3)]
+    rows = [lib.get(sid) for sid in ids]
+    assert [r["meta"]["title"] for r in rows] == ["Choir.pdf","Choir (1).pdf","Choir (2).pdf"]
+    updated = lib.update(ids[2], 1, metadata={"title":"CHOIR.pdf"})
+    assert updated["meta"]["title"] == "CHOIR (2).pdf"
+    assert updated["meta"]["created"] == rows[2]["meta"]["created"]
+    assert updated["meta"]["sourceFileName"] == "Choir.pdf"
+
+def test_scan_repair_inserts_without_rewriting_other_notes_or_lyrics():
+    from src.studio.document import insert_after_note
+    root = read_xml(melody())
+    bar = root.find("part/measure")
+    bar.remove(bar.findall("note")[-1])
+    child(child(bar.find("note"), "lyric"), "text", "我們")
+    original = xml_bytes(root)
+    result = insert_after_note(original, "ss-p0-m0-n0", "F", 1, 4, "quarter")
+    repaired = read_xml(result)
+    total = inspect(repaired)["parts"][0]["measures"][0]
+    assert (total["covered"], total["remaining"], total["possibleMeter"]) == (3, 1, "3/4")
+    assert [n.findtext("pitch/step") for n in repaired.findall(".//note")] == ["C", "F", "D"]
+    assert repaired.findtext(".//lyric/text") == "我們"
+    with pytest.raises(ValueError, match="remaining"):
+        insert_after_note(result, "ss-p0-m0-n1", "E", 0, 4, "half")
+
+
+def test_bar_timing_chords_overlaps_gaps_and_compound_meter():
+    from src.studio.document import bar_rhythm
+    assert bar_rhythm([(0, 1), (0, 1), (.5, 1.5), (2, 3.5)], 3, 8) == {
+        "covered": 3, "remaining": 0, "possibleMeter": "6/8"}
+    assert bar_rhythm([], 4, 4)["possibleMeter"] is None

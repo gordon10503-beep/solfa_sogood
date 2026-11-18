@@ -41,7 +41,7 @@ The optional [`score-layout-preflight` skill](skills/score-layout-preflight/SKIL
 
 ## Local data and limitations
 
-Scores, original imports, annotations and history are stored under `data/`, which is excluded from Git. Back up that directory to preserve your library. The server listens on the local computer; this prototype is not yet a hosted service or packaged iOS/Android app. Some complex notation, repeat navigation and expressive playback require manual review. See the [Studio guide](docs/STUDIO.md) and [platform plan](docs/PLATFORM.md) for details.
+Scores, original imports, annotations and history are stored under `data/`, which is excluded from Git. Back up that directory to preserve your library. The desktop launcher listens on the local computer. For a shared browser workspace use the hosted setup below. Some complex notation, repeat navigation and expressive playback require manual review. See the [Studio guide](docs/STUDIO.md) and [platform plan](docs/PLATFORM.md) for details.
 
 ## Tests and project structure
 
@@ -59,3 +59,22 @@ node tests/test_sampled_audio.cjs
 The earlier Streamlit prototype remains available separately; see [QUICKSTART.md](QUICKSTART.md). Bundled audio and PDF viewer components retain their license notices in `src/studio/static/`.
 
 See [production-readiness criteria](docs/PRODUCTION_READINESS.md) for the MuseScore-inspired editing and reliability work still required before a production release.
+
+
+## Correct a scanned bar
+
+Open **Check score** to compare the original PDF with the recognized music. Warnings are grouped by bar. Expand **Bar timing by part** and select a bar to see how much of it each part fills. Chords and overlapping voices count once, rests count toward the total, and grace notes use no beats. A duration that fits 3/4 can also be a short bar in 4/4. Use the printed signature to decide.
+
+- In **Check score** or **Compose**, drag a pitched note vertically to change its staff position. The preview shows the target pitch. A drag retains the accidental.
+- To enter an exact pitch, click the note, choose **Change pitch on piano**, then play the on-screen piano or the indicated computer keys.
+- For missing beats in a simple bar, select the preceding note, choose **Insert after on piano**, set the length, then play the missing pitches. Each new note becomes the anchor for the next. Undo restores the previous edit. Linked and multi-voice passages may require MusicXML editing.
+- Scanning now expands contrast on faded raster pages. If an ensemble preset cannot match the detected staves, Studio keeps the automatic grouping and adds a review note. Library cards show when scores were added and updated. Duplicate library titles receive numbered suffixes before the file extension.
+
+## Host a shared Studio on Render and Neon
+
+1. In Neon create a Postgres project in Singapore. In **Connect**, copy the pooled connection string including its TLS parameters.
+2. In Render choose **New → Blueprint** and select this repository on `main`. The blueprint creates one free Docker web service in Singapore. Paste the Neon connection string into the secret `DATABASE_URL` field.
+3. Open the service URL over HTTPS. Use username `studio` and the generated `STUDIO_PASSWORD` from Render’s Environment page. Everyone with that password can read and edit the same library.
+4. Import a small PDF to check scanning on your instance. The container includes Audiveris and English, Simplified Chinese and Traditional Chinese OCR data. Large scans can exceed a free instance’s memory. Restarted instances lose active scans and temporary logs. Saved scores, originals and edit history reside in Neon. A newly hosted workspace starts with a demo score.
+
+[Render Blueprint settings](https://render.com/docs/blueprint-spec) · [Neon connection setup](https://neon.com/docs/connect/connect-from-any-app)

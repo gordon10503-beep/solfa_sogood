@@ -39,9 +39,20 @@ def correction_angle(image):
 
 
 def corrected_image(image):
+    # Faded photocopies can have gray staff lines on gray paper. Stretch a
+    # narrow but usable tonal range on the recognition copy before deskew.
+    preview = image.convert("L")
+    preview.thumbnail((1100, 1500))
+    dark, light = np.percentile(np.asarray(preview), (1, 95))
+    normalized = None
+    if 24 <= light - dark <= 145 and dark >= 55 and light >= 150:
+        scale = 255 / (light - dark)
+        normalized = image.convert("L").point(
+            [max(0, min(255, round((v - dark) * scale))) for v in range(256)])
+        image = normalized
     angle = correction_angle(image)
     if not angle:
-        return None
+        return normalized
     return image.convert("RGB").rotate(angle, Image.Resampling.BICUBIC, expand=True, fillcolor="white")
 
 
