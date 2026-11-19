@@ -3,7 +3,7 @@ from pathlib import Path
 from statistics import median
 
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image, ImageFilter, ImageOps
 import pymupdf
 
 
@@ -38,14 +38,56 @@ def correction_angle(image):
     return median(votes) if abs(votes[0]-votes[1]) <= .4 else 0.
 
 
+def flatten_shadows(image, preview):
+    """Estimate slow changes in paper brightness without binarizing fine symbols."""
+    width, height = preview.size
+    if min(width, height) < 160:
+        return None
+    cols, rows = max(3, round(width / 64)), max(3, round(height / 64))
+    # Sample equal-size tiles. The upper percentile estimates paper even
+    # across systems and lyrics, where the darkest pixels are music or text.
+    tile = 32
+    samples = np.asarray(preview.resize((cols * tile, rows * tile), Image.Resampling.BILINEAR))
+    tiles = samples.reshape(rows, tile, cols, tile)
+    ink, paper = np.percentile(tiles, (1, 85), axis=(1, 3))
+    low, high = np.percentile(paper, (10, 90))
+    if low < 90 or high < 160 or high - low < 35:
+        return None
+    # A smooth shadow spans intermediate levels. A black border, a flat
+    # background or an empty sheet alone is insufficient evidence.
+    intermediate = (paper > low + 10) & (paper < high - 10)
+    if intermediate.mean() < .1 or np.count_nonzero(paper - ink > 30) < 3:
+        return None
+    field = Image.fromarray(paper.round().astype(np.uint8)).filter(ImageFilter.MedianFilter(3))
+    background = field.resize(image.size, Image.Resampling.BILINEAR)
+    gray = image.convert("L")
+    # Limit temporary array memory for full-resolution photographs.
+    for y in range(0, image.height, 256):
+        box = (0, y, image.width, min(y + 256, image.height))
+        pixels = np.asarray(gray.crop(box), dtype=np.uint16)
+        light = np.maximum(np.asarray(background.crop(box)), 90)
+        values = np.minimum((pixels * 255 + light // 2) // light, 255)
+        gray.paste(Image.fromarray(values.astype(np.uint8)), box)
+    return gray
+
+
 def corrected_image(image):
     # Faded photocopies can have gray staff lines on gray paper. Stretch a
     # narrow but usable tonal range on the recognition copy before deskew.
     preview = image.convert("L")
     preview.thumbnail((1100, 1500))
-    dark, light = np.percentile(np.asarray(preview), (1, 95))
-    normalized = None
+    normalized = flatten_shadows(image, preview)
+    if normalized is not None:
+        image = normalized
+        preview = normalized.resize(preview.size, Image.Resampling.LANCZOS)
+    pixels = np.asarray(preview)
+    dark, light = np.percentile(pixels, (1, 95))
     if 24 <= light - dark <= 145 and dark >= 55 and light >= 150:
+        # Uneven empty paper can also span these percentiles. Require a
+        # localized edge before stretching contrast across the whole image.
+        edges = np.abs(pixels[2:].astype(np.int16) - pixels[:-2])
+        if np.count_nonzero(edges >= 12) < 8:
+            return normalized
         scale = 255 / (light - dark)
         normalized = image.convert("L").point(
             [max(0, min(255, round((v - dark) * scale))) for v in range(256)])

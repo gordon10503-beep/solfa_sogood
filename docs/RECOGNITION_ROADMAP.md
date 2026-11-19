@@ -4,6 +4,18 @@
 
 The backend is still Audiveris. Selectable music pages and an explicit SATB + piano assembly preset help prevent cover-page input and split logical voices. Meter, part-count, bar-length and rendering checks expose failures; they do not improve notehead classification. No custom model has been trained and no accuracy gain has been measured on a held-out collection.
 
+### Dense engraving trial
+
+Studio now samples vector staff spacing and selects a bounded PDF rendering resolution before recognition. A local trial printed the built-in *Morning light* score at different scales on A4 and compared the Audiveris export to the original MusicXML. Each of the four parts had eight bars. A note counted as an exact match only when its part, bar, onset, spelled pitch and duration all agreed.
+
+| Printed staff spacing | Previous settings | Adaptive local settings | Hosted settings simulated locally |
+| --- | --- | --- | --- |
+| 3.85 pt | 59 of 59 | 59 of 59 | — |
+| 2.50 pt | No export | 59 of 59 | 50 of 59 |
+| 2.00 pt | No export | 53 of 59, with 3 additional unmatched events | No export |
+
+The 2.50-point hosted run produced 59 events in total. A faded raster copy with simulated side lighting scored 59 of 59 with both versions. This trial measures one arrangement under controlled conditions. Accuracy on handwritten material, lyrics and other ensembles needs separate measurement.
+
 ## Proposed layout assistance (not implemented)
 
 Use a vision model as an optional layout adviser, combined with deterministic image geometry:

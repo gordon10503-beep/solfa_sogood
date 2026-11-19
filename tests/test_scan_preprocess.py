@@ -2,6 +2,7 @@ import io
 import hashlib
 
 import pymupdf
+import numpy as np
 from PIL import Image, ImageDraw
 
 from src.studio.scan_preprocess import correction_angle, prepare_for_omr
@@ -54,3 +55,22 @@ def test_faded_staff_contrast_and_blank_abstention():
     corrected = corrected_image(faded)
     assert corrected is not None and corrected.getextrema() == (0, 255)
     assert corrected_image(Image.new("L", faded.size, 185)) is None
+
+
+def test_uneven_light_restores_ink_separation_without_moving_marks():
+    from src.studio.scan_preprocess import corrected_image
+
+    original = staff()
+    ink = np.asarray(original) == 0
+    # A faded photocopy photographed with one side in shadow. No global
+    # threshold can separate all ink from all paper in the original.
+    light = np.linspace(120, 245, original.width)[None, :]
+    pixels = np.where(ink, .65 * light, light).astype(np.uint8)
+    assert pixels[ink].max() >= pixels[~ink].min()
+    result = corrected_image(Image.fromarray(pixels))
+    assert result is not None and result.size == original.size
+    corrected = np.asarray(result)
+    assert corrected[ink].max() + 10 < int(corrected[~ink].min())
+
+    blank = np.broadcast_to(light, pixels.shape).astype(np.uint8)
+    assert corrected_image(Image.fromarray(blank)) is None

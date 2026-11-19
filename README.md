@@ -37,6 +37,10 @@ When importing a PDF, choose **Matching MusicXML (optional)** if you have the sa
 
 Recognition is a draft: check parts, bar alignment, time signatures, notes, rhythms and lyrics against the original before relying on playback. Select music pages to skip covers. Clickable SATB choir, SATB + piano and Piano presets consolidate compatible part assignments; use Automatic for orchestral or changing layouts. Structural checks flag possible problems but cannot establish that every note is correct. Playback highlighting currently applies to the **digital notation**, not to matching locations on the original PDF.
 
+New uploads and **Check score → Rescan with options…** use the same automatic preparation. Studio checks the spacing of repeated five-line staves on a sample of selected engraved PDF pages. For closely spaced staves, it raises the Audiveris render resolution up to 400 DPI, subject to the largest selected page and a tighter memory budget on the hosted service. Raster scans have a separate preparation step for faded ink, uneven lighting and skew. If an enhanced pass fails to transcribe or produces no notation, Studio can retry the original at standard settings. The imported file stays available for comparison. After a successful rescan of playable notation, **Undo** restores the previous version.
+
+On PDFs with embedded Bravura or Leland music symbols, Studio can also recover a missing opening meter, including common and cut time, when the expected opening staves agree. Image-only scans rely on Audiveris for meter recognition.
+
 The optional [`score-layout-preflight` skill](skills/score-layout-preflight/SKILL.md) helps an assistant map systems and parts, review proposed boundaries and export checked system crops. It supports arbitrary ensembles, including orchestral layouts. It is not connected to the Studio Scan button, and its effect on recognition accuracy has not yet been benchmarked. See the [recognition roadmap](docs/RECOGNITION_ROADMAP.md).
 
 ## Local data and limitations

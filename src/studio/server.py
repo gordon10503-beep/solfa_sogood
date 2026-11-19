@@ -27,6 +27,7 @@ import gzip
 import io
 import zipfile
 import urllib.request
+from xml.etree.ElementTree import ParseError
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -36,6 +37,7 @@ from .document import (MAX_BYTES, append_bar, edit_symbol, move_part, rename_par
 from PIL import Image
 from .scan_preprocess import prepare_for_omr
 from .pdf_meter import recover_opening_meter
+from .pdf_resolution import dense_score_dpi
 from .recognition_profile import recognition_flags
 from .scan_options import selected_pages, repair_satb_book
 
@@ -185,16 +187,13 @@ class Library:
                 data, meta = old["xml"], json.loads(old["meta"])
                 db.execute(f"DELETE FROM {source} WHERE id=?", (old["id"],))
             else:
-                db.execute("DELETE FROM redo_history WHERE score=?", (sid,))
-                db.execute("INSERT INTO history(score,xml,meta) VALUES (?,?,?)", (sid, row["xml"], row["meta"]))
+                self.remember(db, sid, row)
                 if metadata is not None:
                     for field in ("group", "bookmarks", "reviewed", "mixer", "practice", "annotations", "playbackReady", "scanError", "title", "trashed"):
                         if field in metadata: meta[field] = metadata[field]
                 if data is not None:
                     info = inspect(read_xml(data))
                     meta.update(title=meta.get("title", info["title"]), composer=info["composer"], reviewed=False)
-                # Keep a bounded, persistent undo history per score.
-                db.execute("DELETE FROM history WHERE score=? AND id NOT IN (SELECT id FROM history WHERE score=? ORDER BY id DESC LIMIT 50)", (sid, sid))
             if row["revision"] == 1:
                 meta.setdefault("created", row["updated"])
             if undo or redo or (metadata and "title" in metadata):
@@ -202,6 +201,12 @@ class Library:
             db.execute("UPDATE scores SET xml=?,meta=?,updated=?,revision=revision+1 WHERE id=?",
                        (data if data is not None else row["xml"], json.dumps(meta), time.time(), sid))
         return self.get(sid)
+
+    @staticmethod
+    def remember(db, sid, row):
+        db.execute("DELETE FROM redo_history WHERE score=?", (sid,))
+        db.execute("INSERT INTO history(score,xml,meta) VALUES (?,?,?)", (sid, row["xml"], row["meta"]))
+        db.execute("DELETE FROM history WHERE score=? AND id NOT IN (SELECT id FROM history WHERE score=? ORDER BY id DESC LIMIT 50)", (sid, sid))
 
 
 def pdf_dimensions(row):
@@ -499,6 +504,37 @@ def run_scan(server, job, *args):
         scan(server, job, *args)
 
 
+def recognize_book(command, source, folder, settings, sheet_args, layout, log, progress):
+    """Transcribe, then export the persisted book to preserve cross-page part assembly."""
+    def run(args, check):
+        flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+        subprocess.run([command, "-batch", *args], stdout=log, stderr=subprocess.STDOUT,
+                       timeout=1200, check=check, **flags)
+
+    print("Recognition settings:", settings or "engine default", file=log, flush=True)
+    run(["-step", "PAGE", "-save", *settings, "-output", str(folder), *sheet_args, "--", str(source)], True)
+    book = next(folder.rglob("*.omr"), None)
+    if book is None:
+        raise ValueError("Audiveris did not produce a score book. Inspect the recognition log.")
+    layout_warning = None
+    if layout != "auto":
+        try:
+            repair_satb_book(book, layout)
+        except ValueError as exc:
+            layout_warning = f"Used automatic grouping. {exc}"
+            print(layout_warning, file=log)
+    progress(2, "Exporting recognized notation")
+    for _ in range(2):
+        run(["-export", *settings, *sheet_args, "--", str(book)], False)
+        exports = sorted(folder.rglob("*.mxl")) or sorted(folder.rglob("*.musicxml"))
+        if exports:
+            output = exports[0].read_bytes()
+            if read_xml(output).find("part/measure/note") is None:
+                raise ValueError("Recognition found no readable notes or rests.")
+            return output, layout_warning
+    raise ValueError("Recognition produced no MusicXML. Review the book in Audiveris.")
+
+
 def scan(server, job, command, data, ext, sid=None, options=None):
     options = options or {}
     sheet_args = ["-sheets", *options["pages"]] if options.get("pages") else []
@@ -509,7 +545,6 @@ def scan(server, job, command, data, ext, sid=None, options=None):
     folder.mkdir(parents=True, exist_ok=True)
     source = folder / f"scan{ext}"
     source.write_bytes(data)
-    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
     try:
         with (folder / "recognition.log").open("w", encoding="utf-8") as log:
             progress(1, "Checking page orientation and staff alignment")
@@ -523,28 +558,30 @@ def scan(server, job, command, data, ext, sid=None, options=None):
             language = options.get("language","default")
             if language != "default":
                 flags_for_book.extend(["-constant", "org.audiveris.omr.text.Language.defaultSpecification=" + language])
-            print("Recognition settings:", flags_for_book or "engine default", file=log, flush=True)
-            subprocess.run([command, "-batch", "-step", "PAGE", "-save", *flags_for_book, "-output", str(folder), *sheet_args, "--", str(recognition_source)],
-                           stdout=log, stderr=subprocess.STDOUT, timeout=1200, check=True, **flags)
-            books = list(folder.rglob("*.omr"))
-            if not books: raise ValueError("Audiveris did not produce a score book. Inspect the recognition log.")
-            layout_warning = None
-            if options.get("layout", "auto") != "auto":
-                try:
-                    repair_satb_book(books[0], options["layout"])
-                except ValueError as exc:
-                    layout_warning = f"Used automatic grouping. {exc}"
-                    print(layout_warning, file=log)
-            exported = []
-            progress(2, "Exporting recognized notation")
-            for _ in range(2):
-                subprocess.run([command, "-batch", "-export", *flags_for_book, *sheet_args, "--", str(books[0])],
-                               stdout=log, stderr=subprocess.STDOUT, timeout=1200, check=False, **flags)
-                exported = list(folder.rglob("*.mxl")) + list(folder.rglob("*.musicxml"))
-                if exported: break
-            if not exported: raise ValueError("Recognition produced no MusicXML. Review the book in Audiveris.")
+            # Vector inspection only applies to the original engraving. A raster
+            # preparation has already been rendered at its available resolution.
+            dpi = None
+            if ext == ".pdf" and recognition_source == source:
+                pixel_budget = 12_000_000 if getattr(server, "public_host", None) else 16_000_000
+                dpi = dense_score_dpi(data, options.get("pages"), pixel_budget)
+            settings = flags_for_book
+            if dpi:
+                progress(1, f"Recognizing closely spaced staves at {dpi} DPI")
+                settings = [*settings, "-constant", f"org.audiveris.omr.image.ImageLoading.pdfResolution={dpi}"]
+            layout = options.get("layout", "auto")
+            try:
+                output, layout_warning = recognize_book(command, recognition_source, folder, settings,
+                                                        sheet_args, layout, log, progress)
+            except (subprocess.CalledProcessError, ValueError, zipfile.BadZipFile, ParseError) as exc:
+                if not dpi and recognition_source == source:
+                    raise
+                print(f"Enhanced scan failed: {exc}", file=log, flush=True)
+                progress(1, "Retrying the original at standard resolution")
+                fallback = folder / "standard"
+                fallback.mkdir()
+                output, layout_warning = recognize_book(command, source, fallback, flags_for_book,
+                                                        sheet_args, layout, log, progress)
         progress(3, "Checking and saving the result")
-        output = exported[0].read_bytes()
         meter = None
         if ext == ".pdf":
             pages = options.get("pages") or [1]
@@ -560,9 +597,13 @@ def scan(server, job, command, data, ext, sid=None, options=None):
             # Scan completion must not overwrite concurrent annotation edits.
             with server.library.connect() as db:
                 server.library.lock_writes(db)
-                db.execute("DELETE FROM redo_history WHERE score=?", (sid,))
-                row = db.execute("SELECT meta FROM scores WHERE id=?", (sid,)).fetchone()
-                meta = json.loads(row["meta"]);meta.update(playbackReady=True, reviewed=False, reviewNote=layout_warning or "", scanPages=options.get("pages") or [])
+                row = db.execute("SELECT xml,meta FROM scores WHERE id=?", (sid,)).fetchone()
+                meta = json.loads(row["meta"])
+                if meta.get("playbackReady", True):
+                    server.library.remember(db, sid, row)
+                else:
+                    db.execute("DELETE FROM redo_history WHERE score=?", (sid,))
+                meta.update(playbackReady=True, reviewed=False, reviewNote=layout_warning or "", scanPages=options.get("pages") or [])
                 db.execute("UPDATE scores SET xml=?,meta=?,updated=?,revision=revision+1 WHERE id=?", (xml_bytes(read_xml(output)),json.dumps(meta),time.time(),sid))
         progress(4, "Scan ready · check the result against the original", status="done", id=sid, finished=time.time())
     except Exception as exc:
