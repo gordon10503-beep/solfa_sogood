@@ -9,7 +9,7 @@
 
 /* Focused workspace pages: tools appear only where they are useful. */
 summary{cursor:pointer;font-size:13px;font-weight:600;padding:12px 0;list-style-position:inside}details:not([open]){margin-bottom:8px}details[open]>summary{margin-bottom:10px}.inspector details .panel-heading{margin-top:8px}
-body[data-page="read"] .pages{max-width:1100px}body[data-page="read"] .score-scroll{padding:28px 8%}body[data-page="library"] .transport{display:none}body[data-page="read"] .transport .tool-button,body[data-page="review"] .transport .tool-button{display:none}
+body[data-page="read"] .pages{max-width:1100px}body[data-page="read"] .score-scroll{padding:28px 8%}body[data-page="library"] .transport{display:none}
 body[data-page="practice"] .inspector{width:360px;min-width:300px}body[data-page="practice"] #mixer{display:grid;grid-template-columns:1fr;gap:8px}body[data-page="practice"] .mixer-part{margin-top:0}
 @media(max-width:700px){body[data-page="practice"] .inspector{width:100%;min-width:0}.sidebar .nav-item{display:flex;margin:8px 0 0;padding:6px}.tabs{gap:16px}.score-heading{padding:16px 20px}.sidebar{padding:8px 20px}main{height:calc(100dvh - 105px)}}
 

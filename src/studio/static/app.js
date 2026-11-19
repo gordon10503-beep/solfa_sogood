@@ -233,6 +233,14 @@ function renderMixer() {
   $("mixer").querySelectorAll("[data-volume]").forEach(i=>{i.oninput=()=>state.mixer[+i.dataset.volume].volume=+i.value;i.onchange=()=>{refreshMix();persistMixer();};});
 }
 let mixSave;
+const mixerHome = $("mixer").parentElement;
+on("instruments-btn","click",()=>{
+  const dialog=$("instrument-dialog");
+  dialog.append($("mixer"));
+  dialog.showModal();
+});
+$("instrument-dialog").addEventListener("close",()=>mixerHome.append($("mixer")));
+
 function persistMixer() { clearTimeout(mixSave); const id=state.score.id, mixer=structuredClone(state.mixer);mixSave=setTimeout(()=>{mixSave=null;queueMeta({mixer},id);},350); }
 function queueMeta(meta,id=state.score?.id) {
   state.saving=state.saving.then(async()=>{

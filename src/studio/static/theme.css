@@ -119,3 +119,7 @@ body:is([data-page=compose],[data-page=review]) #pages .note{touch-action:none;c
 #title-divider:is(:hover,:focus-visible,:active)::after{background:#3666bf}
 @media(pointer:coarse){#title-divider{height:16px;flex-basis:16px}}
 @media print{#title-divider{display:none}}
+
+#instrument-dialog{width:min(440px,94vw);max-height:80dvh;overflow:auto}
+#instrument-dialog .mixer-part{display:block;width:100%;margin-inline:0}
+@media(max-width:700px){.workbar .notation-options{flex-wrap:nowrap}.workbar .tabs{flex:1 1 0}.transport #keyboard-btn{display:inline-flex}}
