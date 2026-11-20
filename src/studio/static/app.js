@@ -745,7 +745,7 @@ document.addEventListener("keydown",run(async e=>{
 }));
 window.addEventListener("beforeunload",()=>{pause();});
 run(async()=>{const session=await api("/api/session");state.token=session.token;
-  if(session.username){$("account-panel").hidden=false;$("account-name").textContent=session.username;$("invite-btn").hidden=session.username!=="studio";}makeKeyboard();await library();if(state.library.length)await openScore(state.library[0].id);showLibrary();requestAnimationFrame(animate);})();
+  if(session.username){$("account-panel").hidden=false;$("account-name").textContent=session.username;$("invite-btn").hidden=session.username!=="studio";}makeKeyboard();await library();showLibrary();requestAnimationFrame(animate);})();
 
 function renderDraft(){
   const symbols={w:"𝅝",h:"𝅗𝅥",q:"♩",e:"♪",s:"♬"};
