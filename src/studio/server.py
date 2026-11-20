@@ -39,6 +39,7 @@ from .scan_preprocess import prepare_for_omr
 from .pdf_meter import recover_opening_meter, recover_opening_tempo
 from .pdf_resolution import dense_score_dpi
 from .recognition_profile import recognition_flags, experiment_flags, page_evidence
+from .playback import build_playback
 from .scan_compare import compare, describe
 from .scan_options import selected_pages, repair_satb_book, repair_empty_run_tables
 
@@ -368,7 +369,18 @@ class Handler(BaseHTTPRequestHandler):
                 sizes = pdf_dimensions(row)
                 chosen = [int(n) for n in row["meta"].get("scanPages",[]) if 1 <= int(n) <= len(sizes)]
                 paper = tuple(sizes[(chosen or [1])[0]-1]) if sizes else None
-                result = rendered(row["xml"], mode, q.get("minor", ["false"])[0] == "true", q.get("solfa", ["true"])[0] == "true", paper, q.get("compact")==["true"], q.get("tenor", ["auto"])[0])
+                minor = q.get("minor") == ["true"]
+                if q.get("reader") == ["pdf"] and paper:
+                    root = read_xml(row["xml"])
+                    info = inspect(root, mode, minor)
+                    result = {**info, **build_playback(root, info), "pages": [], "deferredNotation": True,
+                              "notationVersion": hashlib.sha256(row["xml"]).hexdigest()}
+                else:
+                    if q.get("version") and q["version"][0] != hashlib.sha256(row["xml"]).hexdigest():
+                        raise ValueError("Notation changed in another window. Reopen this score to see the latest version.")
+                    result = rendered(row["xml"], mode, minor, q.get("solfa", ["true"])[0] == "true", paper, q.get("compact")==["true"], q.get("tenor", ["auto"])[0])
+                    if q.get("reader") == ["pages"]:
+                        return self.respond({key: result.get(key) for key in ("pages", "issues", "engravingLog")})
                 return self.respond({**result, "sourceSizes": sizes, "sourcePages": chosen, "id": row["id"], "meta": row["meta"], "revision": row["revision"], "hasSource": row["source"] is not None, "sourceType": row["source_type"], "title": row["meta"].get("title", result["title"])})
             if path.path.startswith("/api/bundle/"):
                 row = self.workspace.library.get(path.path.split("/")[-1])

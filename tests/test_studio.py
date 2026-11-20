@@ -1,5 +1,6 @@
 """Regression tests for real notation, timing, safe edits and persistence."""
 import io
+from pathlib import Path
 import json
 import threading
 import urllib.error
@@ -307,6 +308,16 @@ def test_local_http_import_edit_export_and_origin_checks(tmp_path):
         sid = json.load(request("/api/new", {"title": "Round trip", "bars": 1, "template": "melody"}))["id"]
         result = json.load(request(f"/api/score/{sid}"))
         assert result["title"] == "Round trip"
+        pdf = (Path(__file__).resolve().parents[1] / "benchmarks/fixtures/duet.pdf").read_bytes()
+        score = server.library.add(melody(), source=pdf, source_type="application/pdf")
+        url = f"/api/score/{score}"
+        preview = json.load(request(url+"?reader=pdf"))
+        assert preview["deferredNotation"] and preview["pages"] == [] and preview["events"]
+        pages = json.load(request(url+"?reader=pages&version="+preview["notationVersion"]))
+        assert pages["pages"] and "events" not in pages
+        with pytest.raises(urllib.error.HTTPError):
+            request(url+"?reader=pages&version=obsolete")
+
         copy_id = json.load(request("/api/duplicate", {"id": sid, "revision": 1}))["id"]
         assert copy_id != sid
         assert json.load(request(f"/api/score/{copy_id}"))["title"] == "Round trip (1)"

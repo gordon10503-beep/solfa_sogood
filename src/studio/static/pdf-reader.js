@@ -60,8 +60,9 @@ window.StudioPDF = (() => {
     if(scoreId!==id||JSON.stringify(marks)!==JSON.stringify(annotations||[]))redoByPage.clear();
     marks=structuredClone(annotations||[]);save=onSave;
     if(scoreId!==id){
-      const module=await import('/vendor/pdf.mjs');module.GlobalWorkerOptions.workerSrc='/vendor/pdf.worker.mjs';
-      const response=await fetch('/api/source/'+id);if(!response.ok)throw new Error('Original PDF is unavailable.');
+      const [module,response]=await Promise.all([import('/vendor/pdf.mjs'),fetch('/api/source/'+id)]);
+      module.GlobalWorkerOptions.workerSrc='/vendor/pdf.worker.mjs';
+      if(!response.ok)throw new Error('Original PDF is unavailable.');
       const next=await module.getDocument({data:new Uint8Array(await response.arrayBuffer()),isEvalSupported:false}).promise;
       if(token!==request){await next.destroy();return;}
       generation++;observer?.disconnect();if(pdf)await pdf.destroy();pdf=next;scoreId=id;page=1;

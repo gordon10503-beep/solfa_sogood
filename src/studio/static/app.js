@@ -57,14 +57,18 @@ function safeSvg(svg) {
   }
   return document.importNode(doc.documentElement,true);
 }
+let ensureNotation;
+let lastNotation=null;
 async function openScore(id, preserve=false, initialView="read") {
   if(mixSave) {clearTimeout(mixSave);mixSave=null;if(state.score)await queueMeta({mixer:structuredClone(state.mixer)});}
   await state.saving;
   const generation=++state.openGeneration;
   pause();state.scrollStart=null;$("scroll-only").textContent="▷ Scroll without sound";
   const oldPosition=preserve?state.position:0, oldScroll=preserve?$("score-scroll").scrollTop:0;
-  busy(true,"Engraving your score…");
-  const result=await api(`/api/score/${id}?mode=${$("solfa-mode").value}&tenor=${encodeURIComponent(localStorage.getItem("tenor-clef-"+id)||"auto")}&minor=${$("minor-do").checked}&compact=${$("compact-staves").checked}&solfa=${$("solfa").checked}`);
+  ensureNotation=null;
+  busy(true,"Opening score…");
+  const scoreUrl=`/api/score/${id}?mode=${$("solfa-mode").value}&tenor=${encodeURIComponent(localStorage.getItem("tenor-clef-"+id)||"auto")}&minor=${$("minor-do").checked}&compact=${$("compact-staves").checked}&solfa=${$("solfa").checked}`;
+  const result=await api(scoreUrl+(!preserve||state.view==="original"?"&reader=pdf":""));
   if(generation!==state.openGeneration)return;
   state.score=result;setupLoop(result);state.playbackCursor=new PlaybackCursor(result.events,result.measureTimes);activeHighlightIds=new Set();activeBarElement=null;
   $("reader-format").querySelectorAll("option").forEach(o=>{if(o.value!=="notation")o.disabled=result.sourceType!=="application/pdf";});
@@ -86,63 +90,84 @@ async function openScore(id, preserve=false, initialView="read") {
   $("score-title").textContent=result.title;$("score-eyebrow").textContent=result.meta.group || "UNGROUPED";
   $("score-title").title=result.title;
   $("score-eyebrow").hidden=!result.meta.group || result.meta.group==="Ungrouped";
-  $("score-subtitle").textContent=[result.composer,`${result.parts.length} parts`,`${result.parts[0]?.measures.length||0} bars`,`${result.pages.length} ${result.pages.length===1?"page":"pages"}`].filter(Boolean).join("  ·  ");
+  const pageCount=result.deferredNotation?result.sourceSizes.length:result.pages.length;
+  $("score-subtitle").textContent=[result.composer,`${result.parts.length} parts`,`${result.parts[0]?.measures.length||0} bars`,`${pageCount} ${pageCount===1?"page":"pages"}`].filter(Boolean).join("  ·  ");
   $("breadcrumb").textContent="Score reader";$("library-view").hidden=true;$("score-view").hidden=false;
   $("scan-banner").hidden=result.meta.reviewed || (result.meta.origin!=="Scan" && !result.issues.length);
   $("scan-banner").textContent=result.issues.length?`${result.issues.length} notation checks need attention. Open “Check score” before relying on playback.`:"Recognition is a first draft. Compare the scan, correct notes, then mark it reviewed.";
-  const pageContainers=result.pages.map((_,index)=>{
-    const el=document.createElement('div');el.className='score-page';
-    const pages=result.sourcePages?.length?result.sourcePages:null;
-    const dims=result.sourceSizes?.[(pages?.[index]||index+1)-1] || result.sourceSizes?.at(-1);
-    if(dims){el.classList.add('source-paper');el.style.aspectRatio=dims.join('/');}
-    else el.style.minHeight='400px';
-    return el;
-  });
-  $("pages").replaceChildren(...pageContainers);
-  function mountPage(i){
-    if(generation!==state.openGeneration)return;
-    const container=pageContainers[i];const svg=safeSvg(result.pages[i]);
-    if(container.classList.contains("source-paper")){
-      const inner=svg.querySelector("svg[viewBox]");
-      if(inner){
-        const [x,y,w,h]=inner.getAttribute("viewBox").split(/\s+/).map(Number);
-        const [pw,ph]=container.style.aspectRatio.split("/").map(Number);
-        if(w>0 && h>0 && pw>0 && ph>0){
-          inner.setAttribute("viewBox",[x,y,w,Math.max(h,w*ph/pw)].join(" "));
-          inner.setAttribute("preserveAspectRatio","xMidYMin meet");
+  function mountNotation(){
+    const pageContainers=result.pages.map((_,index)=>{
+      const el=document.createElement('div');el.className='score-page';
+      const pages=result.sourcePages?.length?result.sourcePages:null;
+      const dims=result.sourceSizes?.[(pages?.[index]||index+1)-1] || result.sourceSizes?.at(-1);
+      if(dims){el.classList.add('source-paper');el.style.aspectRatio=dims.join('/');}
+      else el.style.minHeight='400px';
+      return el;
+    });
+    $("pages").replaceChildren(...pageContainers);
+    function mountPage(i){
+      if(generation!==state.openGeneration)return;
+      const container=pageContainers[i];const svg=safeSvg(result.pages[i]);
+      if(container.classList.contains("source-paper")){
+        const inner=svg.querySelector("svg[viewBox]");
+        if(inner){
+          const [x,y,w,h]=inner.getAttribute("viewBox").split(/\s+/).map(Number);
+          const [pw,ph]=container.style.aspectRatio.split("/").map(Number);
+          if(w>0 && h>0 && pw>0 && ph>0){
+            inner.setAttribute("viewBox",[x,y,w,Math.max(h,w*ph/pw)].join(" "));
+            inner.setAttribute("preserveAspectRatio","xMidYMin meet");
+          }
         }
       }
+      container.appendChild(svg);container.style.minHeight='';
+      const number=document.createElement('div');number.className='page-number';number.textContent=`${i+1} / ${result.pages.length}`;container.appendChild(number);
+      const measures=Array.from(container.querySelectorAll('.measure[id^="ss-measure-"]'),el=>[el,el.getBBox()]);
+      const notes=Array.from(container.querySelectorAll(".note,.rest,.mRest")).filter(el=>result.notes[el.id]).map(el=>[el,el.getBBox()]);
+      measures.forEach(([measure,box])=>{
+        const marker=document.createElementNS('http://www.w3.org/2000/svg','rect');
+        for(const [key,value] of Object.entries({x:box.x-12,y:box.y-12,width:box.width+24,height:box.height+24,rx:12}))marker.setAttribute(key,String(value));
+        marker.classList.add('playback-bar-marker');marker.setAttribute('aria-hidden','true');measure.insertBefore(marker,measure.firstChild);
+      });
+      notes.forEach(([note,bounds])=>{
+        note.setAttribute("tabindex","0");note.setAttribute("role","button");
+        // SVG groups otherwise only respond on the thin painted note/stem paths.
+        // Give the whole note a forgiving, transparent hit area for mouse/touch.
+        const hit=document.createElementNS("http://www.w3.org/2000/svg","rect");
+        for(const [key,value] of Object.entries({x:bounds.x-20,y:bounds.y-20,width:bounds.width+40,height:bounds.height+40,fill:"transparent","pointer-events":"all"}))hit.setAttribute(key,String(value));
+        hit.setAttribute("aria-hidden","true");note.insertBefore(hit,note.firstChild);
+        const n=result.notes[note.id];note.setAttribute("aria-label",`${result.parts[n.part].name}, bar ${n.measure+1}, ${n.rest?"rest":n.step+n.octave}`);
+        if(n.pitched) bindPitchDrag(note,n);
+        note.addEventListener("click",()=>selectNote(note.id));note.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();selectNote(note.id);}});
+      });
     }
-    container.appendChild(svg);container.style.minHeight='';
-    const number=document.createElement('div');number.className='page-number';number.textContent=`${i+1} / ${result.pages.length}`;container.appendChild(number);
-    container.querySelectorAll('.measure[id^="ss-measure-"]').forEach(measure=>{
-      const box=measure.getBBox(), marker=document.createElementNS('http://www.w3.org/2000/svg','rect');
-      for(const [key,value] of Object.entries({x:box.x-12,y:box.y-12,width:box.width+24,height:box.height+24,rx:12}))marker.setAttribute(key,String(value));
-      marker.classList.add('playback-bar-marker');marker.setAttribute('aria-hidden','true');measure.insertBefore(marker,measure.firstChild);
-    });
-  container.querySelectorAll(".note,.rest,.mRest").forEach(note=>{
-    if(!result.notes[note.id])return;
-    note.setAttribute("tabindex","0");note.setAttribute("role","button");
-    // SVG groups otherwise only respond on the thin painted note/stem paths.
-    // Give the whole note a forgiving, transparent hit area for mouse/touch.
-    const bounds=note.getBBox(), hit=document.createElementNS("http://www.w3.org/2000/svg","rect");
-    for(const [key,value] of Object.entries({x:bounds.x-20,y:bounds.y-20,width:bounds.width+40,height:bounds.height+40,fill:"transparent","pointer-events":"all"}))hit.setAttribute(key,String(value));
-    hit.setAttribute("aria-hidden","true");note.insertBefore(hit,note.firstChild);
-    const n=result.notes[note.id];note.setAttribute("aria-label",`${result.parts[n.part].name}, bar ${n.measure+1}, ${n.rest?"rest":n.step+n.octave}`);
-    if(n.pitched) bindPitchDrag(note,n);
-    note.addEventListener("click",()=>selectNote(note.id));note.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();selectNote(note.id);}});
-  });
+    if(result.pages.length)mountPage(0);
+    let nextPage=1;
+    function mountLater(){if(generation!==state.openGeneration||nextPage>=result.pages.length)return;mountPage(nextPage++);(window.requestIdleCallback||requestAnimationFrame)(mountLater);}
+    (window.requestIdleCallback||requestAnimationFrame)(mountLater);
   }
-  if(result.pages.length)mountPage(0);
-  let nextPage=1;
-  function mountLater(){if(generation!==state.openGeneration||nextPage>=result.pages.length)return;mountPage(nextPage++);(window.requestIdleCallback||requestAnimationFrame)(mountLater);}
-  (window.requestIdleCallback||requestAnimationFrame)(mountLater);
+  $("pages").replaceChildren();
+  let loading=null;
+  ensureNotation=async()=>{
+    if(!result.deferredNotation)return;
+    const url=scoreUrl+"&reader=pages&version="+result.notationVersion;
+    $("pages").textContent="Preparing notation…";
+    if(!loading)loading=lastNotation?.url===url?Promise.resolve(lastNotation.data):api(url).catch(error=>{loading=null;throw error;});
+    const notation=await loading;
+    if(generation!==state.openGeneration || !result.deferredNotation || state.view==="original")return;
+    lastNotation={url,data:notation};
+    Object.assign(result,notation,{deferredNotation:false});
+    mountNotation();renderIssues();
+  };
   renderMixer();renderBookmarks();renderIssues();fillComposer();setView(state.view,false);updateTransport();
   $("reviewed").checked=!!result.meta.reviewed;$("source-btn").disabled=!result.hasSource;
   $("source-btn").textContent=result.hasSource?"View original scan ↗":"No scan attached · MusicXML source";
   setPianoAction(null);$("repitch-key").disabled=true;$("insert-key").disabled=true;
   $("apply-note").disabled=true;$("note-selection").textContent="Select a note on the score";
-  $("score-scroll").scrollTop=oldScroll;renderLibrary();busy(false);await readerFormat();
+  renderLibrary();busy(false);
+  const opening=readerFormat();
+  if(!result.deferredNotation)mountNotation();
+  $("score-scroll").scrollTop=oldScroll;
+  await opening;
 }
 function setView(view, refresh=true) {
   const format = state.score?.sourceType==="application/pdf" ?
@@ -771,7 +796,8 @@ async function readerFormat(){
   controls.hidden=!original;
   $("digital-reader").hidden=format==="pdf";
   $("pages").hidden=format==="pdf";$("pdf-reader").hidden=!original;
-  if(original&&state.score){const id=state.score.id;await StudioPDF.open(id,state.score.meta.annotations,marks=>queueMeta({annotations:marks},id),state.score.sourceSizes,state.score.sourcePages);}
+  if(format!=="pdf" && ensureNotation)await ensureNotation();
+  if(original&&state.score && $("reader-format").value===format){const id=state.score.id;await StudioPDF.open(id,state.score.meta.annotations,marks=>queueMeta({annotations:marks},id),state.score.sourceSizes,state.score.sourcePages);}
 }
 on("reader-format","change",readerFormat);
 

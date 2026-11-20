@@ -1,8 +1,11 @@
 /* Local rear-camera preview: no recording, streaming server or upload. */
 (() => {
   const panel=document.getElementById('conductor-camera'),video=document.getElementById('camera-video'),button=document.getElementById('camera-toggle');
+  const menu=button.closest('details'),trigger=menu.querySelector('summary');
+  document.addEventListener('pointerdown',e=>{if(!menu.contains(e.target))menu.open=false;});
+  menu.addEventListener('keydown',e=>{if(e.key==='Escape'){menu.open=false;trigger.focus();}});
   let stream=null,drag=null,request=0;
-  function stop(){request++;stream?.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;panel.hidden=true;button.setAttribute('aria-pressed','false');}
+  function stop(){request++;stream?.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;panel.hidden=true;button.textContent='Start camera';button.setAttribute('aria-pressed','false');}
   button.onclick=async()=>{
     if(stream){stop();return;}
     if(!navigator.mediaDevices?.getUserMedia){alert('Camera needs HTTPS or localhost and a supported browser.');return;}
@@ -10,7 +13,7 @@
     try{
       const next=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:640},height:{ideal:480}},audio:false});
       if(ticket!==request){next.getTracks().forEach(t=>t.stop());return;}
-      stream=next;video.srcObject=stream;panel.hidden=false;await video.play();button.setAttribute('aria-pressed','true');
+      stream=next;video.srcObject=stream;panel.hidden=false;await video.play();button.textContent='Stop camera';menu.open=false;trigger.focus();button.setAttribute('aria-pressed','true');
     }catch(e){stop();alert(`Camera unavailable: ${e.message}`);}finally{button.disabled=false;}
   };
   document.getElementById('camera-close').onclick=stop;

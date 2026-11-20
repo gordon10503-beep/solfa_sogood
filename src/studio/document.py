@@ -333,10 +333,10 @@ def engrave(data, mode="movable", minor_do=False, solfa=True, paper=None, compac
         tk = verovio.toolkit()
         width, height = (max(100, min(6000,round(n*254/72))) for n in paper) if paper else (2100,2600)
         encoded = bool(paper and root.find(".//print[@new-page='yes']") is not None)
-        tk.setOptions({"pageWidth": width, "pageHeight": height, "scale": 45,
-                       "adjustPageHeight": encoded or not paper, "breaks": "encoded" if encoded else "auto", "lyricWordSpace": 1.8, "lyricHeightFactor": 1.2, "footer": "none",
+        tk.setOptions({"outputFormatRaw": True, "svgFormatRaw": True, "pageWidth": width, "pageHeight": height, "scale": 45,
+                       "adjustPageHeight": encoded or not paper, "breaks": "none", "lyricWordSpace": 1.8, "lyricHeightFactor": 1.2, "footer": "none",
                        "condenseFirstPage": compact, "header": "none", "spacingStaff": 16, "spacingSystem": 12})
-        if not tk.loadData(xml_bytes(root).decode()):
+        if not tk.loadData(ET.tostring(root, encoding="unicode")):
             raise ValueError("The engraving engine could not read this score. Check MusicXML notation.")
         logs = [tk.getLog().strip()]
         mei = fromstring(tk.getMEI())
@@ -357,6 +357,7 @@ def engrave(data, mode="movable", minor_do=False, solfa=True, paper=None, compac
                             "startid": f"#{nid}", "place": "above", "staff": staff_by_note[nid],
                             "color": "#537667", XML_ID: f"solfa-{nid}"})
                         direction.text = source["solfa"]
+        tk.setOptions({"breaks": "encoded" if encoded else "auto"})
         if not tk.loadData(ET.tostring(mei, encoding="unicode")):
             raise ValueError("Could not engrave the score.")
         logs.append(tk.getLog().strip())
