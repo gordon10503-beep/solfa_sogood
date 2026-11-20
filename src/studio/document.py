@@ -272,12 +272,26 @@ def prepare_render_structure(root, info):
         info["issues"].append({"code": "broken-endings", "message": "Recognition produced incomplete or overlapping repeat endings. Their brackets are hidden in the display to keep opening bars visible. Saved notation is unchanged; repeat playback still needs review."})
 
 
-def engrave(data, mode="movable", minor_do=False, solfa=True, paper=None, compact=False):
+def engrave(data, mode="movable", minor_do=False, solfa=True, paper=None, compact=False, tenor_part="auto"):
     import verovio
     root = read_xml(data)
     info = inspect(root, mode, minor_do)
     playback = build_playback(root, info)
     prepare_render_structure(root, info)
+    # Reading preferences affect only the disposable engraving copy.
+    for part in root.findall("part"):
+        ident = part.get("id")
+        name = next((sp.findtext("part-name", "") for sp in root.findall("part-list/score-part")
+                     if sp.get("id") == ident), "")
+        if ident == tenor_part or (tenor_part == "auto" and name.strip().casefold() == "tenor"):
+            for clef in part.findall("measure/attributes/clef"):
+                if clef.findtext("sign") == "G" and clef.findtext("line") == "2" and clef.find("clef-octave-change") is None:
+                    child(clef, "clef-octave-change", "-1")
+    if paper:
+        # OCR offsets describe the original engraving, not a reflowed system.
+        for lyric in root.findall(".//note/lyric"):
+            for attr in ("default-x", "default-y", "relative-x", "relative-y"):
+                lyric.attrib.pop(attr, None)
     # Supply omitted note types for otherwise valid duration-only MusicXML.
     for pi, p in enumerate(root.findall("part")):
         for mi, m in enumerate(p.findall("measure")):
@@ -318,9 +332,9 @@ def engrave(data, mode="movable", minor_do=False, solfa=True, paper=None, compac
         verovio.setDefaultResourcePath(str(Path(verovio.__file__).parent / "data"))
         tk = verovio.toolkit()
         width, height = (max(100, min(6000,round(n*254/72))) for n in paper) if paper else (2100,2600)
-        encoded = paper and root.find(".//print[@new-page='yes']") is not None
+        encoded = bool(paper and root.find(".//print[@new-page='yes']") is not None)
         tk.setOptions({"pageWidth": width, "pageHeight": height, "scale": 45,
-                       "adjustPageHeight": not paper, "breaks": "encoded" if encoded else "auto", "footer": "none",
+                       "adjustPageHeight": encoded or not paper, "breaks": "encoded" if encoded else "auto", "lyricWordSpace": 1.8, "lyricHeightFactor": 1.2, "footer": "none",
                        "condenseFirstPage": compact, "header": "none", "spacingStaff": 16, "spacingSystem": 12})
         if not tk.loadData(xml_bytes(root).decode()):
             raise ValueError("The engraving engine could not read this score. Check MusicXML notation.")

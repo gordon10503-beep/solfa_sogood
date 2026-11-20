@@ -57,18 +57,22 @@ function safeSvg(svg) {
   }
   return document.importNode(doc.documentElement,true);
 }
-async function openScore(id, preserve=false) {
+async function openScore(id, preserve=false, initialView="read") {
   if(mixSave) {clearTimeout(mixSave);mixSave=null;if(state.score)await queueMeta({mixer:structuredClone(state.mixer)});}
   await state.saving;
   const generation=++state.openGeneration;
   pause();state.scrollStart=null;$("scroll-only").textContent="▷ Scroll without sound";
   const oldPosition=preserve?state.position:0, oldScroll=preserve?$("score-scroll").scrollTop:0;
   busy(true,"Engraving your score…");
-  const result=await api(`/api/score/${id}?mode=${$("solfa-mode").value}&minor=${$("minor-do").checked}&compact=${$("compact-staves").checked}&solfa=${$("solfa").checked}`);
+  const result=await api(`/api/score/${id}?mode=${$("solfa-mode").value}&tenor=${encodeURIComponent(localStorage.getItem("tenor-clef-"+id)||"auto")}&minor=${$("minor-do").checked}&compact=${$("compact-staves").checked}&solfa=${$("solfa").checked}`);
   if(generation!==state.openGeneration)return;
   state.score=result;setupLoop(result);state.playbackCursor=new PlaybackCursor(result.events,result.measureTimes);activeHighlightIds=new Set();activeBarElement=null;
   $("reader-format").querySelectorAll("option").forEach(o=>{if(o.value!=="notation")o.disabled=result.sourceType!=="application/pdf";});
   document.querySelector('[data-view="original"]').hidden=result.sourceType!=="application/pdf";
+  if(!preserve)state.view=result.sourceType==="application/pdf"?"original":initialView;
+  const clefs=$("tenor-clef");
+  clefs.replaceChildren(new Option("Named tenor parts","auto"),new Option("As scanned","off"),...result.parts.map(p=>new Option(p.name,p.id)));
+  clefs.value=localStorage.getItem("tenor-clef-"+id)||"auto";
   if(state.view==="original" && result.sourceType!=="application/pdf")state.view="read";
   state.position=Math.min(oldPosition,result.duration);state.selected=null;document.querySelectorAll("[data-symbol]").forEach(b=>b.disabled=true);
   state.mixer=result.parts.map((p,i)=>({...{sounds:["Piano"],volume:.7,mute:false,solo:false},...(result.meta.mixer?.[i]||{})}));
@@ -97,7 +101,19 @@ async function openScore(id, preserve=false) {
   $("pages").replaceChildren(...pageContainers);
   function mountPage(i){
     if(generation!==state.openGeneration)return;
-    const container=pageContainers[i];container.appendChild(safeSvg(result.pages[i]));container.style.minHeight='';
+    const container=pageContainers[i];const svg=safeSvg(result.pages[i]);
+    if(container.classList.contains("source-paper")){
+      const inner=svg.querySelector("svg[viewBox]");
+      if(inner){
+        const [x,y,w,h]=inner.getAttribute("viewBox").split(/\s+/).map(Number);
+        const [pw,ph]=container.style.aspectRatio.split("/").map(Number);
+        if(w>0 && h>0 && pw>0 && ph>0){
+          inner.setAttribute("viewBox",[x,y,w,Math.max(h,w*ph/pw)].join(" "));
+          inner.setAttribute("preserveAspectRatio","xMidYMin meet");
+        }
+      }
+    }
+    container.appendChild(svg);container.style.minHeight='';
     const number=document.createElement('div');number.className='page-number';number.textContent=`${i+1} / ${result.pages.length}`;container.appendChild(number);
     container.querySelectorAll('.measure[id^="ss-measure-"]').forEach(measure=>{
       const box=measure.getBBox(), marker=document.createElementNS('http://www.w3.org/2000/svg','rect');
@@ -607,7 +623,7 @@ on("search","input",()=>{showLibrary();renderLibrary();});
 on("new-group","click",()=>{if(!state.score){toast("Open a score first to place it in a collection.");return;}textDialog("Give your music a home","Collection name",state.score.meta.group||"",async group=>{await queueMeta({group});$("score-eyebrow").textContent=group;toast("Score moved to the collection.");});});
 on("score-eyebrow","click",()=>$ ("new-group").click());
 on("new-btn","click",()=>$("new-dialog").showModal());
-on("new-form","submit",async e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.target));for(const k of ["bars","beats","beat_type","fifths","tempo"])data[k]=Number(data[k]);busy(true,"Creating your score…");const r=await api("/api/new",data);$("new-dialog").close();await library();state.view="compose";await openScore(r.id);});
+on("new-form","submit",async e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.target));for(const k of ["bars","beats","beat_type","fifths","tempo"])data[k]=Number(data[k]);busy(true,"Creating your score…");const r=await api("/api/new",data);$("new-dialog").close();await library();await openScore(r.id,false,"compose");});
 on("text-form","submit",async e=>{e.preventDefault();const value=$("text-value").value.trim();if(!value)return;await textCallback(value);$("text-dialog").close();});
 document.querySelectorAll(".close-dialog").forEach(b=>b.onclick=()=>b.closest("dialog").close());
 document.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>setView(b.dataset.view));
@@ -702,6 +718,7 @@ function changeFollow(event) {
 }
 on("follow","change",changeFollow);
 on("read-follow","change",changeFollow);
+on("tenor-clef","change",()=>{if(state.score){localStorage.setItem("tenor-clef-"+state.score.id,$("tenor-clef").value);return openScore(state.score.id,true);}});
 on("compact-staves","change",()=>{if(state.score)run(()=>openScore(state.score.id,true))();});
 on("scroll-duration","change",async()=>{$("scroll-duration").value=Math.max(5,Math.min(7200,+$("scroll-duration").value||120));await savePractice();});
 on("scroll-only","click",()=>{if(state.scrollStart!==null){state.scrollStart=null;$("scroll-only").textContent="▷ Scroll without sound";return;}pause();state.scrollStart=performance.now();state.scrollOrigin=$("score-scroll").scrollTop;$("scroll-only").textContent="Ⅱ Pause scrolling";});

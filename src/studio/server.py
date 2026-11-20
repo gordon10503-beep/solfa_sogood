@@ -225,8 +225,8 @@ def pdf_dimensions(row):
 
 
 @functools.lru_cache(maxsize=6)
-def rendered(data, mode, minor_do, solfa, paper=None, compact=False):
-    return engrave(data, mode, minor_do, solfa, paper, compact)
+def rendered(data, mode, minor_do, solfa, paper=None, compact=False, tenor_part="auto"):
+    return engrave(data, mode, minor_do, solfa, paper, compact, tenor_part)
 
 
 def seed(library):
@@ -367,7 +367,7 @@ class Handler(BaseHTTPRequestHandler):
                 sizes = pdf_dimensions(row)
                 chosen = [int(n) for n in row["meta"].get("scanPages",[]) if 1 <= int(n) <= len(sizes)]
                 paper = tuple(sizes[(chosen or [1])[0]-1]) if sizes else None
-                result = rendered(row["xml"], mode, q.get("minor", ["false"])[0] == "true", q.get("solfa", ["true"])[0] == "true", paper, q.get("compact")==["true"])
+                result = rendered(row["xml"], mode, q.get("minor", ["false"])[0] == "true", q.get("solfa", ["true"])[0] == "true", paper, q.get("compact")==["true"], q.get("tenor", ["auto"])[0])
                 return self.respond({**result, "sourceSizes": sizes, "sourcePages": chosen, "id": row["id"], "meta": row["meta"], "revision": row["revision"], "hasSource": row["source"] is not None, "sourceType": row["source_type"], "title": row["meta"].get("title", result["title"])})
             if path.path.startswith("/api/bundle/"):
                 row = self.workspace.library.get(path.path.split("/")[-1])
