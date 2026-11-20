@@ -141,3 +141,4 @@ body:is([data-page=compose],[data-page=review]) #pages .note{touch-action:none;c
 @media(max-width:700px){.camera-popover{right:auto;left:50%;transform:translateX(-50%)}}
 @media screen and (max-width:700px){body[data-page=original] .workspace{display:flex;overflow:hidden}body[data-page=original] .score-scroll{min-height:0;overflow:auto}}
 .scan-job-title [data-dismiss-scan]{display:grid;place-items:center;flex:0 0 44px;height:44px;padding:0;font-size:32px;font-weight:600;line-height:1}
+.workbar .notation-options>details{margin:0}.workbar .notation-options>details>.reader-action{display:flex}
