@@ -33,7 +33,9 @@ def main():
             data = urllib.request.urlopen(url, timeout=60).read()
             if hashlib.sha256(data).hexdigest() != digest:
                 raise ValueError(f"Unexpected Audiveris source revision for {name}")
-            source.write_bytes(data)
+            # The pinned sources use CRLF. Git on Linux matches our LF patch
+            # context literally. Verify upstream bytes first, then normalize.
+            source.write_bytes(data.replace(b"\r\n", b"\n"))
             sources.append(str(source))
             subprocess.run(["git", "apply", str(Path(__file__).with_name(patch).resolve())], cwd=work, check=True)
         classes = work / "classes"
