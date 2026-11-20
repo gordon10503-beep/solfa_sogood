@@ -155,3 +155,21 @@ body[data-page=original] #score-scroll.spread-focus{position:fixed;inset:0;z-ind
 .spread-focus #pdf-pages .pdf-sheet{max-width:min(100%,calc(100dvh * var(--sheet-ratio,.707)));box-shadow:none}
 .spread-focus #pdf-pages.horizontal{gap:0}
 }
+
+@media screen and (min-width:701px){
+  .sidebar-collapsed #library-navigation{display:none}
+  body.sidebar-collapsed main{margin-left:0;width:100%}
+  .topbar .breadcrumb{margin-right:auto;margin-left:12px}
+}
+@media screen and (max-width:700px){#sidebar-toggle{display:none}}
+@media screen{
+  body:has(#score-view:not([hidden])) .topbar{height:auto;min-height:38px;padding-block:2px}
+  #score-view .workbar .tab{padding-block:4px;min-height:32px}
+  #score-view .workbar .notation-options{padding-block:0}
+  #score-view .workbar .reader-action{height:32px;min-height:32px}
+  #score-view>#pdf-controls:not([hidden]){display:flex;align-items:center;gap:6px;position:static;flex:none;margin:0;padding:3px 10px;overflow-x:auto;border-bottom:1px solid var(--line)}
+  #score-view>#pdf-controls .pdf-tools{flex:none;flex-wrap:nowrap;padding:0;gap:5px}
+  #score-view>#pdf-controls #spread-actions{flex:none;white-space:nowrap}
+  #score-view>#pdf-controls .hint{display:none}
+}
+@media(pointer:coarse){#score-view .workbar .reader-action,#score-view .workbar .tab{min-height:44px}}

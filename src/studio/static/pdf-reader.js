@@ -87,6 +87,8 @@ window.StudioPDF = (() => {
   let previousLayout;
   function focusSpread(enabled){
     const anchor=slots[page-1];
+    if(enabled)pane.prepend($('pdf-controls'));
+    else $('edit-strip').before($('pdf-controls'));
     pane.classList.toggle('spread-focus',enabled);
     pane.classList.remove('spread-tools-open');
     $('spread-tools').setAttribute('aria-expanded','false');

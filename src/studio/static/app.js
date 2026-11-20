@@ -799,13 +799,24 @@ on("keyboard-lower","click",()=>$("keyboard-scroll").scrollBy({left:-308,behavio
 on("keyboard-higher","click",()=>$("keyboard-scroll").scrollBy({left:308,behavior:"smooth"}));
 renderDraft();
 
+function displaySidebar(collapsed){
+  document.body.classList.toggle("sidebar-collapsed",collapsed);
+  $("sidebar-toggle").setAttribute("aria-expanded",String(!collapsed));
+  $("sidebar-toggle").textContent=collapsed?"Show library":"Hide library";
+}
+displaySidebar(localStorage.getItem("sidebar-collapsed")==="true");
+on("sidebar-toggle","click",()=>{
+  const collapsed=!document.body.classList.contains("sidebar-collapsed");
+  displaySidebar(collapsed);
+  localStorage.setItem("sidebar-collapsed",String(collapsed));
+});
+
 async function readerFormat(){
   const format=$("reader-format").value,original=format!=="notation";
   $("reader-surfaces").classList.toggle("comparison",format==="compare");
   StudioPDF.setComparison(format==="compare");
   const controls=$("pdf-controls");
-  if(format==="compare")$("reader-surfaces").before(controls);
-  else $("pdf-reader").prepend(controls);
+  if(!$("score-scroll").classList.contains("spread-focus"))$("edit-strip").before(controls);
   controls.hidden=!original;
   $("digital-reader").hidden=format==="pdf";
   $("pages").hidden=format==="pdf";$("pdf-reader").hidden=!original;
