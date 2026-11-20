@@ -1,0 +1,65 @@
+--- a/PartwiseBuilder.java
++++ b/PartwiseBuilder.java
+@@ -3679,6 +3679,40 @@
+         }
+     }
+ 
++    // Studio patch: index timed hairpin endpoints once for the current system.
++    private SIGraph wedgeGraph;
++    private final Map<Measure, List<TimedWedge>> wedgesByMeasure = new HashMap<>();
++
++    private void indexWedges (SIGraph graph)
++    {
++        if (graph == wedgeGraph) {
++            return;
++        }
++        wedgesByMeasure.clear();
++        wedgeGraph = graph;
++        for (Inter inter : graph.inters(WedgeInter.class)) {
++            WedgeInter wedge = (WedgeInter) inter;
++            List<TimedWedge> pair = new ArrayList<>(2);
++            for (HorizontalSide side : HorizontalSide.values()) {
++                AbstractChordInter chord = wedge.getChord(side);
++                if (chord == null) {
++                    continue;
++                }
++                if (chord.getTimeOffset() == null || chord.getNotes().isEmpty() || chord.getMeasure() == null) {
++                    // Abandon this uncertain hairpin, preserving the notes in its measure.
++                    pair.clear();
++                    break;
++                }
++                pair.add(new TimedWedge(wedge, side, (AbstractNoteInter) chord.getNotes().get(0),
++                        chord.getTimeOffset()));
++            }
++            for (TimedWedge event : pair) {
++                Measure owner = wedge.getChord(event.side).getMeasure();
++                wedgesByMeasure.computeIfAbsent(owner, key -> new ArrayList<>()).add(event);
++            }
++        }
++    }
++
+     //----------------//
+     // WedgeIterators //
+     //----------------//
+@@ -3700,19 +3734,8 @@
+         {
+             final SIGraph sig = measure.getStack().getSystem().getSig();
+ 
+-            for (Inter inter : sig.inters(WedgeInter.class)) {
+-                WedgeInter wedge = (WedgeInter) inter;
+-
+-                for (HorizontalSide side : HorizontalSide.values()) {
+-                    AbstractChordInter chord = wedge.getChord(side);
+-
+-                    if ((chord != null) && (chord.getMeasure() == measure)) {
+-                        // We take the first note of the chord as reference
+-                        AbstractNoteInter refNote = (AbstractNoteInter) chord.getNotes().get(0);
+-                        events.add(new TimedWedge(wedge, side, refNote, chord.getTimeOffset()));
+-                    }
+-                }
+-            }
++            indexWedges(sig);
++            events.addAll(wedgesByMeasure.getOrDefault(measure, Collections.emptyList()));
+ 
+             // Sort by time offset, and for same offset, ensure START (LEFT) comes before STOP (RIGHT)
+             Collections.sort(

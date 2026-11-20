@@ -3,4 +3,6 @@
 !src/**
 !requirements-studio.txt
 !Dockerfile
+!engine/
+!engine/**
 **/__pycache__/

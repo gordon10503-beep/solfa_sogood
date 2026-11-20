@@ -45,6 +45,8 @@ The optional [`score-layout-preflight` skill](skills/score-layout-preflight/SKIL
 
 ### Local choir benchmarks
 
+Studio includes Java changes to Audiveris's notehead matcher and MusicXML exporter. The hosted image builds the patched engine, and the local app can use its own private copy. [Engine changes and build instructions](engine/README.md)
+
 Run `python -m benchmarks.choir "path/to/score.pdf"` inside the Studio environment. The runner recognizes the two test editions by SHA-256, creates a separate temporary library, and reports part lengths, opening tempo, recognized tuplet groups and elapsed time. The five-page middle benchmark uses Automatic grouping. The fourteen-page advanced benchmark uses SATB + piano and checks the printed 55 bars and opening dotted quarter = 72 (quarter = 108). Counts describe the export. Pitch, lyrics and later tempo directions still require comparison with the PDF.
 
 In **Reading options**, toggle **Follow the music** or **Hide silent staves**. Turn off the latter to see rests while editing. In **Check score → Check recognized tuplets**, select a group to locate its bar. **Use regular notes** removes a simple false tuplet and restores the written note lengths. Undo restores the group. The scan notification can be collapsed while recognition continues.

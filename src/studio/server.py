@@ -67,6 +67,9 @@ def audiveris_path():
     configured = os.environ.get("AUDIVERIS_CMD")
     if configured:
         return shutil.which(configured) or (configured if Path(configured).is_file() else None)
+    private = ROOT / "build" / "studio-audiveris"
+    if (private / "app/solfa-engine-v1").is_file() and (private / "Audiveris.exe").is_file():
+        return str(private / "Audiveris.exe")
     return shutil.which("audiveris") or next((str(p) for p in [
         Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Audiveris/Audiveris.exe"
     ] if p.is_file()), None)

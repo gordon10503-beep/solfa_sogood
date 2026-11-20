@@ -1,0 +1,62 @@
+--- a/Template.java
++++ b/Template.java
+@@ -93,6 +93,31 @@
+     /** Scaling factor. */
+     private final int pointSize;
+ 
++    // Prepack mask positions by expected ink type for the matching hot loop.
++    private volatile int[][] matchingMask;
++
++    private int[][] matchingMask ()
++    {
++        int[][] cached = matchingMask;
++        if (cached != null) {
++            return cached;
++        }
++        List<PixelDistance> points = getKeyPoints();
++        int[] counts = new int[3];
++        for (PixelDistance p : points) {
++            counts[p.d == 0 ? 0 : p.d > 0 ? 1 : 2] += 2;
++        }
++        int[][] mask = {new int[counts[0]], new int[counts[1]], new int[counts[2]]};
++        int[] cursor = new int[3];
++        for (PixelDistance p : points) {
++            int type = p.d == 0 ? 0 : p.d > 0 ? 1 : 2;
++            mask[type][cursor[type]++] = p.x;
++            mask[type][cursor[type]++] = p.y;
++        }
++        matchingMask = mask;
++        return mask;
++    }
++
+     /** Template width. (perhaps larger than symbol width) */
+     private final int width;
+ 
+@@ -215,6 +240,27 @@
+         final double holeWeight = constants.holeWeight.getValue();
+         double weights = 0; // Sum of weights
+         double total = 0; // Sum of weighted distances
++
++        // Clipped templates and custom weights use the original evaluator.
++        // For interior masks with stock integer weights the grouped sums are exact.
++        if (ul.x >= 0 && ul.y >= 0 && ul.x <= imgWidth - width && ul.y <= imgHeight - height
++                && foreWeight == 6 && backWeight == 1 && holeWeight == 4) {
++            int[][] mask = matchingMask();
++            for (int type = 0; type < mask.length; type++) {
++                int[] offsets = mask[type];
++                int valid = 0;
++                int ink = 0;
++                for (int i = 0; i < offsets.length; i += 2) {
++                    int value = distances.getValue(ul.x + offsets[i], ul.y + offsets[i + 1]);
++                    valid += value != ChamferDistance.VALUE_UNKNOWN ? 1 : 0;
++                    ink += value == 0 ? 1 : 0;
++                }
++                double weight = type == 0 ? foreWeight : type == 1 ? backWeight : holeWeight;
++                weights += weight * valid;
++                total += weight * (type == 0 ? valid - ink : ink);
++            }
++            return weights == 0 ? Double.MAX_VALUE : total / weights;
++        }
+ 
+         for (PixelDistance pix : getKeyPoints()) {
+             int nx = ul.x + pix.x;
