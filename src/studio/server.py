@@ -226,6 +226,14 @@ def pdf_dimensions(row):
         return []
 
 
+@functools.lru_cache(maxsize=2)
+def pdf_playback_preview(data, mode, minor):
+    root = read_xml(data)
+    info = inspect(root, mode, minor)
+    return {**info, **build_playback(root, info), "pages": [], "deferredNotation": True,
+            "notationVersion": hashlib.sha256(data).hexdigest()}
+
+
 @functools.lru_cache(maxsize=6)
 def rendered(data, mode, minor_do, solfa, paper=None, compact=False, tenor_part="auto"):
     return engrave(data, mode, minor_do, solfa, paper, compact, tenor_part)
@@ -371,10 +379,7 @@ class Handler(BaseHTTPRequestHandler):
                 paper = tuple(sizes[(chosen or [1])[0]-1]) if sizes else None
                 minor = q.get("minor") == ["true"]
                 if q.get("reader") == ["pdf"] and paper:
-                    root = read_xml(row["xml"])
-                    info = inspect(root, mode, minor)
-                    result = {**info, **build_playback(root, info), "pages": [], "deferredNotation": True,
-                              "notationVersion": hashlib.sha256(row["xml"]).hexdigest()}
+                    result = pdf_playback_preview(row["xml"], mode, minor)
                 else:
                     if q.get("version") and q["version"][0] != hashlib.sha256(row["xml"]).hexdigest():
                         raise ValueError("Notation changed in another window. Reopen this score to see the latest version.")
@@ -398,7 +403,7 @@ class Handler(BaseHTTPRequestHandler):
             if path.path.startswith("/api/source/"):
                 row = self.workspace.library.get(path.path.split("/")[-1])
                 if row["source"] is None: raise ValueError("No source scan is attached.")
-                return self.respond(row["source"], row["source_type"])
+                return self.respond(row["source"], row["source_type"], etag='"' + hashlib.sha256(row["source"]).hexdigest() + '"')
             if path.path == "/api/session": return self.respond({"token": self.workspace.token, "username": self.username})
             relative = "index.html" if path.path == "/" else path.path.lstrip("/")
             file = (STATIC / relative).resolve()

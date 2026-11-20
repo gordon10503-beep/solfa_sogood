@@ -79,6 +79,11 @@ async function openScore(id, preserve=false, initialView="read") {
   clefs.value=localStorage.getItem("tenor-clef-"+id)||"auto";
   if(state.view==="original" && result.sourceType!=="application/pdf")state.view="read";
   state.position=Math.min(oldPosition,result.duration);state.selected=null;document.querySelectorAll("[data-symbol]").forEach(b=>b.disabled=true);
+  const listen=$("listen-part"), sounding=new Set(result.events.map(e=>e.part));
+  const previous=preserve?listen.value:"";
+  listen.replaceChildren(new Option("Listen: current mix",""),...result.parts.flatMap((p,i)=>sounding.has(i)?[new Option("Hear "+p.name+" only",String(i))]:[]));
+  listen.value=previous;
+  listen.disabled=!sounding.size || result.meta.playbackReady===false;
   state.mixer=result.parts.map((p,i)=>({...{sounds:["Piano"],volume:.7,mute:false,solo:false},...(result.meta.mixer?.[i]||{})}));
   if(!preserve) {
     const practice=result.meta.practice||{};
@@ -433,8 +438,8 @@ async function play() {
   if(state.score.meta.playbackReady===false){toast("Recognition is not ready. The original PDF is available to read and annotate.");return;}
   busy(true,"Loading sampled instruments…");
   try{
-    const needed=new Map(),solo=state.mixer.some(m=>m.solo);
-    for(const e of state.score.events){const mix=state.mixer[e.part];if(!mix||mix.mute||(solo&&!mix.solo))continue;for(const name of mix.sounds){if(!needed.has(name))needed.set(name,new Set());needed.get(name).add(e.pitch);}}
+    const needed=new Map();
+    for(const e of state.score.events){const mix=rehearsalMix(e.part);if(!mix)continue;for(const name of mix.sounds){if(!needed.has(name))needed.set(name,new Set());needed.get(name).add(e.pitch);}}
     await Promise.all([...needed].map(([name,pitches])=>StudioSamples.load(state.audio,name,[...pitches])));
   }finally{busy(false);}
   state.scrollStart=null;$("scroll-only").textContent="▷ Scroll without sound";
@@ -481,9 +486,17 @@ on('loop-toggle','click',async()=>{
 function refreshMix() {
   if(state.playing){pause();play().catch(e=>toast(e.message,true));}
 }
+on("listen-part","change",refreshMix);
+const guidePiano={sounds:["Piano"],volume:1};
+function rehearsalMix(part){
+  const selected=$("listen-part").value;
+  if(selected!=="")return part===Number(selected)?guidePiano:null;
+  const mix=state.mixer[part];
+  return mix && !mix.mute && (mix.solo||!state.mixer.some(p=>p.solo))?mix:null;
+}
 function playEvent(e) {
-  const m=state.mixer[e.part],solo=state.mixer.some(p=>p.solo);
-  if(!m||m.mute||(solo&&!m.solo))return;
+  const m=rehearsalMix(e.part);
+  if(!m)return;
   const start=Math.max(state.audio.currentTime,state.started+e.time/state.speed);
   for(const s of m.sounds)StudioSamples.play(state.audio,state.master,state.nodes,e.pitch,Math.min(e.duration,(state.loop?.end??Infinity)-e.time)/state.speed,start,s,m.volume/Math.sqrt(Math.max(1,m.sounds.length)));
 }
