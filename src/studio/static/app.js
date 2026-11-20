@@ -794,6 +794,7 @@ async function manageMeta(id,meta){
   }
   if(state.score?.id===id){state.score.revision=result.revision;state.score.meta=result.meta;state.score.title=result.meta.title;$('score-title').textContent=result.meta.title;$('score-eyebrow').textContent=result.meta.group;}
   await library();
+  return result.meta;
 }
 async function scoreAction(id,action){
   closeScoreMenu();const item=state.library.find(s=>s.id===id);
@@ -801,7 +802,7 @@ async function scoreAction(id,action){
   if(action==='rename')return textDialog('Rename score','Display name (original filename is retained)',item.title,value=>manageMeta(id,{title:value}));
   if(action==='group')return textDialog('Move to collection','Choose an existing collection or type a new name',item.group||'',value=>manageMeta(id,{group:value}));
   if(action==='ungroup')return manageMeta(id,{group:'Ungrouped'});
-  if(action==='trash'||action==='restore'){await manageMeta(id,{trashed:action==='trash'});if(state.score?.id===id)showLibrary();toast(action==='trash'?'Moved to Trash. You can restore it from the sidebar.':'Score restored.');return;}
+  if(action==='trash'||action==='restore'){const saved=await manageMeta(id,{trashed:action==='trash'});if(state.score?.id===id)showLibrary();toast(action==='trash'?'Moved to Trash. You can restore it from the sidebar.':'Restored as '+saved.title+'.');return;}
   if(action==='duplicate'){await state.saving;const result=await api('/api/duplicate',{id,revision:item.revision});await library();state.trash=false;state.group=null;showLibrary();renderLibrary();toast('Independent copy created.');return;}
   if(action==='bundle'){
     const response=await fetch('/api/bundle/'+id);

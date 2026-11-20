@@ -471,3 +471,17 @@ def test_undo_redo_branches_and_palette_rests(tmp_path):
     lib.update(sid,5,metadata={"group":"New branch"})
     with pytest.raises(ValueError):
         lib.update(sid,6,redo=True)
+
+def test_trash_releases_title_and_restore_resolves_collision(tmp_path):
+    lib = Library(tmp_path / "trash.sqlite3")
+    meta = {"title": "Choir.pdf", "sourceFileName": "Choir.pdf"}
+    old = lib.add(melody(), meta)
+    lib.update(old, 1, metadata={"trashed": True})
+    replacement = lib.add(melody(), meta)
+    assert lib.get(replacement)["meta"]["title"] == "Choir.pdf"
+    restored = lib.update(old, 2, metadata={"trashed": False})
+    assert restored["meta"]["title"] == "Choir (1).pdf"
+    assert restored["meta"]["sourceFileName"] == "Choir.pdf"
+    assert lib.update(old, 3, undo=True)["meta"]["title"] == "Choir.pdf"
+    lib.update(replacement, 1, metadata={"trashed": True})
+    assert lib.update(old, 4, metadata={"trashed": False})["meta"]["title"] == "Choir.pdf"

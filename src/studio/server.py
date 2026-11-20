@@ -78,8 +78,9 @@ def audiveris_path():
 
 def available_title(db, requested, exclude=None):
     title = requested.strip() or "Untitled score"
-    occupied = {json.loads(row["meta"])["title"].strip().casefold()
-                for row in db.execute("SELECT meta FROM scores WHERE id <> ?", (exclude or "",))}
+    rows = db.execute("SELECT meta FROM scores WHERE id <> ?", (exclude or "",))
+    records = (json.loads(row["meta"]) for row in rows)
+    occupied = {meta["title"].strip().casefold() for meta in records if not meta.get("trashed")}
     if title.casefold() not in occupied:
         return title
     stem, extension = os.path.splitext(title)
@@ -200,7 +201,7 @@ class Library:
                     meta.update(title=meta.get("title", info["title"]), composer=info["composer"], reviewed=False)
             if row["revision"] == 1:
                 meta.setdefault("created", row["updated"])
-            if undo or redo or (metadata and "title" in metadata):
+            if not meta.get("trashed") and (undo or redo or (metadata and ("title" in metadata or "trashed" in metadata))):
                 meta["title"] = available_title(db, meta["title"], sid)
             db.execute("UPDATE scores SET xml=?,meta=?,updated=?,revision=revision+1 WHERE id=?",
                        (data if data is not None else row["xml"], json.dumps(meta), time.time(), sid))
