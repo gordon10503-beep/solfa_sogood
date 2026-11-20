@@ -99,8 +99,11 @@ def inspect(root, mode="movable", minor_do=False):
         transpositions = {"1": 0}
         clefs = {"1": ("G", 2, 0)}
         measures = []
+        export_page = 1
         meter_known = False
         for mi, measure in enumerate(part.findall("measure")):
+            if mi and measure.find("print[@new-page='yes']") is not None:
+                export_page += 1
             cursor, last_start, extent = 0., 0., 0.
             voices, tempos = {}, []
             intervals = []
@@ -207,7 +210,7 @@ def inspect(root, mode="movable", minor_do=False):
                 issues.append({"part": pi, "measure": mi, "message": f"Overfull bar: {extent:g} quarter beats; expected {expected:g}."})
             elif extent < expected - 1e-5 and mi != 0 and measure.get("implicit") != "yes":
                 issues.append({"part": pi, "measure": mi, "message": f"Short bar: {extent:g} quarter beats; expected {expected:g}. Check pickup or missing notes."})
-            measures.append({"number": measure.get("number", str(mi + 1)), "beats": beats,
+            measures.append({"exportPage": export_page, "number": measure.get("number", str(mi + 1)), "beats": beats,
                              "beatType": beat_type, "length": expected, "divisions": divisions,
                              "meterKnown": meter_known, **bar_rhythm(intervals, expected, beat_type),
                              "fifths": key.fifths, "mode": key.mode, "extent": extent,

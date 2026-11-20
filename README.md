@@ -99,3 +99,7 @@ Open **Check score** to compare the original PDF with the recognized music. Warn
 In **Check score** and **Compose**, drag a symbol from the top palette, or select it and tap the staff. Place a note within a rest to split that rest at the selected subdivision. Drop articulations directly onto notes. Drag a pitched note vertically for an immediate staff preview. Undo and redo support Ctrl/Cmd+Z, Ctrl+Y and Cmd/Ctrl+Shift+Z. **Reading options** remembers the title and toolbar spacing on this device. On small screens **Library** opens the navigation drawer.
 
 The hosted project shares its database storage allowance across personal libraries. Original PDFs, MusicXML, duplicated scores, trash and edit history all use space. See [current Neon plan limits](https://neon.com/docs/introduction/plans).
+
+## Comparing recognition results
+
+Open **Check score → Compare a page scan** to try a different recognition profile on one original PDF page and inspect the competing transcription. See the [choir benchmark and ablation report](docs/RECOGNITION_ABLATION.md) for reproducible commands, verified reference scores and full-page baseline exports.

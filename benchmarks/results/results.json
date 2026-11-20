@@ -1,0 +1,1148 @@
+{
+  "satb": {
+    "referenceSHA256": "0ff5ae0bc0a61f40eb06d2268d264badf4981651772d6a09797b18943af81ed7",
+    "pdfSHA256": "89f7f8a38bd0d15459c31c02c4fbd501d220f358d1074ec9d12597b1d2b07cee",
+    "profiles": {
+      "baseline": {
+        "outputSuccess": true,
+        "comparison": {
+          "baselineParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Tenor",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Bass",
+              "staves": 1,
+              "bars": 8
+            }
+          ],
+          "candidateParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Tenor",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Bass",
+              "staves": 1,
+              "bars": 8
+            }
+          ],
+          "partCountMatches": true,
+          "partNamesAndStavesMatch": true,
+          "barCountsMatch": true,
+          "matched": 59,
+          "baselineOnly": 0,
+          "candidateOnly": 0,
+          "baselineExamples": [],
+          "candidateExamples": []
+        },
+        "structure": {
+          "validPartIds": true,
+          "alignedBarNumbers": true,
+          "inspectionFindings": {}
+        }
+      },
+      "both": {
+        "outputSuccess": true,
+        "comparison": {
+          "baselineParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Tenor",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Bass",
+              "staves": 1,
+              "bars": 8
+            }
+          ],
+          "candidateParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Tenor",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Bass",
+              "staves": 1,
+              "bars": 8
+            }
+          ],
+          "partCountMatches": true,
+          "partNamesAndStavesMatch": true,
+          "barCountsMatch": true,
+          "matched": 59,
+          "baselineOnly": 0,
+          "candidateOnly": 0,
+          "baselineExamples": [],
+          "candidateExamples": []
+        },
+        "structure": {
+          "validPartIds": true,
+          "alignedBarNumbers": true,
+          "inspectionFindings": {}
+        }
+      },
+      "font": {
+        "outputSuccess": true,
+        "comparison": {
+          "baselineParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Tenor",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Bass",
+              "staves": 1,
+              "bars": 8
+            }
+          ],
+          "candidateParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Tenor",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Bass",
+              "staves": 1,
+              "bars": 8
+            }
+          ],
+          "partCountMatches": true,
+          "partNamesAndStavesMatch": true,
+          "barCountsMatch": true,
+          "matched": 59,
+          "baselineOnly": 0,
+          "candidateOnly": 0,
+          "baselineExamples": [],
+          "candidateExamples": []
+        },
+        "structure": {
+          "validPartIds": true,
+          "alignedBarNumbers": true,
+          "inspectionFindings": {}
+        }
+      },
+      "quality": {
+        "outputSuccess": true,
+        "comparison": {
+          "baselineParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Tenor",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Bass",
+              "staves": 1,
+              "bars": 8
+            }
+          ],
+          "candidateParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Tenor",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Bass",
+              "staves": 1,
+              "bars": 8
+            }
+          ],
+          "partCountMatches": true,
+          "partNamesAndStavesMatch": true,
+          "barCountsMatch": true,
+          "matched": 59,
+          "baselineOnly": 0,
+          "candidateOnly": 0,
+          "baselineExamples": [],
+          "candidateExamples": []
+        },
+        "structure": {
+          "validPartIds": true,
+          "alignedBarNumbers": true,
+          "inspectionFindings": {}
+        }
+      }
+    }
+  },
+  "duet": {
+    "referenceSHA256": "a016d20d70d661679c454972d23d9440a00c43876e62df26cba5efea80940fa2",
+    "pdfSHA256": "bf363351d91298e2ac1b983fd419b9f877e4c60cdd33732abee5fb98c8eb0dcf",
+    "profiles": {
+      "baseline": {
+        "outputSuccess": true,
+        "comparison": {
+          "baselineParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 4
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 4
+            }
+          ],
+          "candidateParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 4
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 4
+            }
+          ],
+          "partCountMatches": true,
+          "partNamesAndStavesMatch": true,
+          "barCountsMatch": true,
+          "matched": 23,
+          "baselineOnly": 0,
+          "candidateOnly": 0,
+          "baselineExamples": [],
+          "candidateExamples": []
+        },
+        "structure": {
+          "validPartIds": true,
+          "alignedBarNumbers": true,
+          "inspectionFindings": {}
+        }
+      },
+      "both": {
+        "outputSuccess": true,
+        "comparison": {
+          "baselineParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 4
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 4
+            }
+          ],
+          "candidateParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 4
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 4
+            }
+          ],
+          "partCountMatches": true,
+          "partNamesAndStavesMatch": true,
+          "barCountsMatch": true,
+          "matched": 23,
+          "baselineOnly": 0,
+          "candidateOnly": 0,
+          "baselineExamples": [],
+          "candidateExamples": []
+        },
+        "structure": {
+          "validPartIds": true,
+          "alignedBarNumbers": true,
+          "inspectionFindings": {}
+        }
+      },
+      "font": {
+        "outputSuccess": true,
+        "comparison": {
+          "baselineParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 4
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 4
+            }
+          ],
+          "candidateParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 4
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 4
+            }
+          ],
+          "partCountMatches": true,
+          "partNamesAndStavesMatch": true,
+          "barCountsMatch": true,
+          "matched": 23,
+          "baselineOnly": 0,
+          "candidateOnly": 0,
+          "baselineExamples": [],
+          "candidateExamples": []
+        },
+        "structure": {
+          "validPartIds": true,
+          "alignedBarNumbers": true,
+          "inspectionFindings": {}
+        }
+      },
+      "quality": {
+        "outputSuccess": true,
+        "comparison": {
+          "baselineParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 4
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 4
+            }
+          ],
+          "candidateParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 4
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 4
+            }
+          ],
+          "partCountMatches": true,
+          "partNamesAndStavesMatch": true,
+          "barCountsMatch": true,
+          "matched": 23,
+          "baselineOnly": 0,
+          "candidateOnly": 0,
+          "baselineExamples": [],
+          "candidateExamples": []
+        },
+        "structure": {
+          "validPartIds": true,
+          "alignedBarNumbers": true,
+          "inspectionFindings": {}
+        }
+      }
+    }
+  },
+  "compact": {
+    "referenceSHA256": "0ff5ae0bc0a61f40eb06d2268d264badf4981651772d6a09797b18943af81ed7",
+    "pdfSHA256": "41dba9f64f3a3dafabaa5a2ab395780e1118ce2ab89480a3a797709ebe0ede7a",
+    "profiles": {
+      "baseline": {
+        "outputSuccess": true,
+        "comparison": {
+          "baselineParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Tenor",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Bass",
+              "staves": 1,
+              "bars": 8
+            }
+          ],
+          "candidateParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 7
+            },
+            {
+              "name": "Alm",
+              "staves": 1,
+              "bars": 7
+            },
+            {
+              "name": "Tenor",
+              "staves": 1,
+              "bars": 7
+            },
+            {
+              "name": "Bass",
+              "staves": 1,
+              "bars": 7
+            }
+          ],
+          "partCountMatches": true,
+          "partNamesAndStavesMatch": false,
+          "barCountsMatch": false,
+          "matched": 47,
+          "baselineOnly": 12,
+          "candidateOnly": 0,
+          "baselineExamples": [
+            {
+              "part": 1,
+              "bar": 4,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "E5",
+              "duration": "4",
+              "count": 1
+            },
+            {
+              "part": 1,
+              "bar": 8,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "C5",
+              "duration": "4",
+              "count": 1
+            },
+            {
+              "part": 2,
+              "bar": 2,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "C5",
+              "duration": "4",
+              "count": 1
+            },
+            {
+              "part": 2,
+              "bar": 4,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "C5",
+              "duration": "4",
+              "count": 1
+            },
+            {
+              "part": 2,
+              "bar": 8,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "G4",
+              "duration": "4",
+              "count": 1
+            }
+          ],
+          "candidateExamples": []
+        },
+        "structure": {
+          "validPartIds": true,
+          "alignedBarNumbers": true,
+          "inspectionFindings": {
+            "Short bar": 6
+          }
+        }
+      },
+      "both": {
+        "outputSuccess": true,
+        "comparison": {
+          "baselineParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Tenor",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Bass",
+              "staves": 1,
+              "bars": 8
+            }
+          ],
+          "candidateParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Alm",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Tenor",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Bass",
+              "staves": 1,
+              "bars": 8
+            }
+          ],
+          "partCountMatches": true,
+          "partNamesAndStavesMatch": false,
+          "barCountsMatch": true,
+          "matched": 58,
+          "baselineOnly": 1,
+          "candidateOnly": 0,
+          "baselineExamples": [
+            {
+              "part": 2,
+              "bar": 8,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "G4",
+              "duration": "4",
+              "count": 1
+            }
+          ],
+          "candidateExamples": []
+        },
+        "structure": {
+          "validPartIds": true,
+          "alignedBarNumbers": true,
+          "inspectionFindings": {
+            "Short bar": 1
+          }
+        }
+      },
+      "font": {
+        "outputSuccess": true,
+        "comparison": {
+          "baselineParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Tenor",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Bass",
+              "staves": 1,
+              "bars": 8
+            }
+          ],
+          "candidateParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Alm",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Tenor",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Bass",
+              "staves": 1,
+              "bars": 8
+            }
+          ],
+          "partCountMatches": true,
+          "partNamesAndStavesMatch": false,
+          "barCountsMatch": true,
+          "matched": 58,
+          "baselineOnly": 1,
+          "candidateOnly": 0,
+          "baselineExamples": [
+            {
+              "part": 2,
+              "bar": 8,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "G4",
+              "duration": "4",
+              "count": 1
+            }
+          ],
+          "candidateExamples": []
+        },
+        "structure": {
+          "validPartIds": true,
+          "alignedBarNumbers": true,
+          "inspectionFindings": {
+            "Short bar": 1
+          }
+        }
+      },
+      "quality": {
+        "outputSuccess": true,
+        "comparison": {
+          "baselineParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Tenor",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Bass",
+              "staves": 1,
+              "bars": 8
+            }
+          ],
+          "candidateParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 7
+            },
+            {
+              "name": "Alm",
+              "staves": 1,
+              "bars": 7
+            },
+            {
+              "name": "Tenor",
+              "staves": 1,
+              "bars": 7
+            },
+            {
+              "name": "Bass",
+              "staves": 1,
+              "bars": 7
+            }
+          ],
+          "partCountMatches": true,
+          "partNamesAndStavesMatch": false,
+          "barCountsMatch": false,
+          "matched": 47,
+          "baselineOnly": 12,
+          "candidateOnly": 0,
+          "baselineExamples": [
+            {
+              "part": 1,
+              "bar": 4,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "E5",
+              "duration": "4",
+              "count": 1
+            },
+            {
+              "part": 1,
+              "bar": 8,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "C5",
+              "duration": "4",
+              "count": 1
+            },
+            {
+              "part": 2,
+              "bar": 2,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "C5",
+              "duration": "4",
+              "count": 1
+            },
+            {
+              "part": 2,
+              "bar": 4,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "C5",
+              "duration": "4",
+              "count": 1
+            },
+            {
+              "part": 2,
+              "bar": 8,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "G4",
+              "duration": "4",
+              "count": 1
+            }
+          ],
+          "candidateExamples": []
+        },
+        "structure": {
+          "validPartIds": true,
+          "alignedBarNumbers": true,
+          "inspectionFindings": {
+            "Short bar": 6
+          }
+        }
+      },
+      "studio-dpi": {
+        "outputSuccess": true,
+        "comparison": {
+          "baselineParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Tenor",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Bass",
+              "staves": 1,
+              "bars": 8
+            }
+          ],
+          "candidateParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 7
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 7
+            },
+            {
+              "name": "Ten or",
+              "staves": 1,
+              "bars": 7
+            },
+            {
+              "name": "Voice",
+              "staves": 1,
+              "bars": 7
+            }
+          ],
+          "partCountMatches": true,
+          "partNamesAndStavesMatch": false,
+          "barCountsMatch": false,
+          "matched": 47,
+          "baselineOnly": 12,
+          "candidateOnly": 0,
+          "baselineExamples": [
+            {
+              "part": 1,
+              "bar": 4,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "E5",
+              "duration": "4",
+              "count": 1
+            },
+            {
+              "part": 1,
+              "bar": 8,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "C5",
+              "duration": "4",
+              "count": 1
+            },
+            {
+              "part": 2,
+              "bar": 2,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "C5",
+              "duration": "4",
+              "count": 1
+            },
+            {
+              "part": 2,
+              "bar": 4,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "C5",
+              "duration": "4",
+              "count": 1
+            },
+            {
+              "part": 2,
+              "bar": 8,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "G4",
+              "duration": "4",
+              "count": 1
+            }
+          ],
+          "candidateExamples": []
+        },
+        "structure": {
+          "validPartIds": true,
+          "alignedBarNumbers": true,
+          "inspectionFindings": {
+            "Short bar": 6
+          }
+        }
+      },
+      "studio-dpi-both": {
+        "outputSuccess": true,
+        "comparison": {
+          "baselineParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Tenor",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Bass",
+              "staves": 1,
+              "bars": 8
+            }
+          ],
+          "candidateParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Ten or",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Voice",
+              "staves": 1,
+              "bars": 8
+            }
+          ],
+          "partCountMatches": true,
+          "partNamesAndStavesMatch": false,
+          "barCountsMatch": true,
+          "matched": 59,
+          "baselineOnly": 0,
+          "candidateOnly": 0,
+          "baselineExamples": [],
+          "candidateExamples": []
+        },
+        "structure": {
+          "validPartIds": true,
+          "alignedBarNumbers": true,
+          "inspectionFindings": {}
+        }
+      },
+      "studio-dpi-font": {
+        "outputSuccess": true,
+        "comparison": {
+          "baselineParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Tenor",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Bass",
+              "staves": 1,
+              "bars": 8
+            }
+          ],
+          "candidateParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Ten or",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Voice",
+              "staves": 1,
+              "bars": 8
+            }
+          ],
+          "partCountMatches": true,
+          "partNamesAndStavesMatch": false,
+          "barCountsMatch": true,
+          "matched": 59,
+          "baselineOnly": 0,
+          "candidateOnly": 0,
+          "baselineExamples": [],
+          "candidateExamples": []
+        },
+        "structure": {
+          "validPartIds": true,
+          "alignedBarNumbers": true,
+          "inspectionFindings": {}
+        }
+      },
+      "studio-dpi-quality": {
+        "outputSuccess": true,
+        "comparison": {
+          "baselineParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Tenor",
+              "staves": 1,
+              "bars": 8
+            },
+            {
+              "name": "Bass",
+              "staves": 1,
+              "bars": 8
+            }
+          ],
+          "candidateParts": [
+            {
+              "name": "Soprano",
+              "staves": 1,
+              "bars": 7
+            },
+            {
+              "name": "Alto",
+              "staves": 1,
+              "bars": 7
+            },
+            {
+              "name": "Ten or",
+              "staves": 1,
+              "bars": 7
+            },
+            {
+              "name": "Voice",
+              "staves": 1,
+              "bars": 7
+            }
+          ],
+          "partCountMatches": true,
+          "partNamesAndStavesMatch": false,
+          "barCountsMatch": false,
+          "matched": 47,
+          "baselineOnly": 12,
+          "candidateOnly": 0,
+          "baselineExamples": [
+            {
+              "part": 1,
+              "bar": 4,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "E5",
+              "duration": "4",
+              "count": 1
+            },
+            {
+              "part": 1,
+              "bar": 8,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "C5",
+              "duration": "4",
+              "count": 1
+            },
+            {
+              "part": 2,
+              "bar": 2,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "C5",
+              "duration": "4",
+              "count": 1
+            },
+            {
+              "part": 2,
+              "bar": 4,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "C5",
+              "duration": "4",
+              "count": 1
+            },
+            {
+              "part": 2,
+              "bar": 8,
+              "onset": "0",
+              "staff": "1",
+              "pitch": "G4",
+              "duration": "4",
+              "count": 1
+            }
+          ],
+          "candidateExamples": []
+        },
+        "structure": {
+          "validPartIds": true,
+          "alignedBarNumbers": true,
+          "inspectionFindings": {
+            "Short bar": 6
+          }
+        }
+      }
+    }
+  }
+}

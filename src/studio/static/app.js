@@ -276,7 +276,48 @@ function jumpBar(index,part=0) {
   if(note && $(note.id)) scrollToElement($(note.id));
   updateTransport();
 }
+function renderPageTrials(){
+  const score=state.score, trial=score.meta.pageTrial;
+  const panel=$("trial-panel");
+  panel.hidden=score.sourceType!=="application/pdf" || score.meta.playbackReady===false;
+  if(panel.hidden)return;
+  $("trial-controls").hidden=!!trial || !state.scanner;
+  const pages=score.sourcePages?.length?score.sourcePages:score.sourceSizes.map((_,i)=>i+1);
+  const mapped=score.parts.every(p=>p.measures.at(-1)?.exportPage===pages.length);
+  const flagged=new Set();
+  if(mapped)for(const issue of score.issues){
+    const at=score.parts[issue.part]?.measures[issue.measure]?.exportPage;
+    if(at)flagged.add(pages[at-1]);
+  }
+  const previous=$("trial-page").value;
+  $("trial-page").replaceChildren(...pages.map(n=>new Option(n+(flagged.has(n)?" · check":""),n)));
+  $("trial-page").value=pages.includes(+previous)?previous:String([...flagged][0]||pages[0]);
+  $("trial-guidance").textContent=trial?"Independent page scan. Compare with the original PDF before editing.":"Choose a page to scan as a separate library score. Each trial keeps all staves and lyrics on the page.";
+  const results=$("trial-results");results.replaceChildren();
+  const items=trial?[score.meta]:state.library.filter(item=>!item.trashed && item.pageTrial?.parent===score.id);
+  for(const item of items){
+    const t=item.pageTrial,c=t.comparison,block=document.createElement("div");
+    const text=(value)=>{const p=document.createElement("p");p.className="hint";p.textContent=value;block.append(p);};
+    text("Page "+t.page+" · "+(t.font||"Default font")+" · "+(t.quality||"Default quality")+" · baseline revision "+t.revision);
+    const parts=list=>list.map(p=>p.name+" ("+p.bars+" bars)").join(", ");
+    if(c)text("Baseline: "+parts(c.baselineParts));
+    text("Trial: "+parts(t.candidateParts));
+    if(c){
+      text("By part and bar position: "+c.matched+" matching notes, "+c.baselineOnly+" baseline only, "+c.candidateOnly+" trial only.");
+      for(const [label,examples] of [["Baseline",c.baselineExamples],["Trial",c.candidateExamples]]){
+        if(examples?.length)text(label+" examples: "+examples.map(n=>"part "+n.part+", bar "+n.bar+" "+n.pitch+" at "+n.onset+" ("+n.duration+" quarter beats)").join(" · "));
+      }
+    }else text("The baseline export has insufficient page breaks to align these notes.");
+    const link=document.createElement("button");link.className="button small";link.textContent=trial?"Open baseline":"Open trial";
+    link.onclick=run(async()=>{await openScore(trial?t.parent:item.id);setView("review");$("trial-panel").open=true;});block.append(link);results.append(block);
+  }
+}
+on("trial-run","click",async()=>{
+  const r=await api("/api/page-trial",{id:state.score.id,page:+$("trial-page").value,profile:$("trial-profile").value});
+  syncScanJobs([{job:r.job,parent:state.score.id,name:r.name,status:"running",stage:0}]);
+});
 function renderIssues() {
+  renderPageTrials();
   renderRhythmReport(state.currentMeasure);
   const issues=state.score.issues;$("review-note").textContent=state.score.meta.reviewNote||"";$("issue-count").textContent=issues.length;$("review-pill").textContent=state.score.meta.reviewed?"REVIEWED":"TO REVIEW";
   const bars = new Map(), notices = [];
@@ -813,7 +854,7 @@ async function pollScans(){
     for(const [id,previous] of scanJobs){
       if(previous.status!=='running')continue;
       const next=await api('/api/job/'+id);scanJobs.set(id,{...previous,...next});
-      if(next.status==='done'){await state.saving;await library();if(state.score?.id===next.id)await openScore(next.id,true);toast('Scan ready. Compare the result with the original.');}
+      if(next.status==='done'){await state.saving;await library();if(state.score?.id===next.id)await openScore(next.id,true);if(next.parent===state.score?.id)renderPageTrials();toast(next.parent?'Page trial ready in Check score.':'Scan ready. Compare the result with the original.');}
     }
   }catch(e){for(const j of scanJobs.values())if(j.status==='running')j.detail='Connection interrupted · retrying…';}
   finally{scanPollTimer=null;renderScanJobs();scheduleScanPoll();}

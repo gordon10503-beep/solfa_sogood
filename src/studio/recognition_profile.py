@@ -49,3 +49,34 @@ def recognition_flags(mode, data, ext, pages):
     if mode == "off":
         return ["-constant", "org.audiveris.omr.sheet.ProcessingSwitches.smallHeads=false"]
     return []
+
+def experiment_flags(font=None, quality=None):
+    flags = []
+    for key, value, allowed in (
+        ("org.audiveris.omr.ui.symbol.MusicFont.defaultMusicFamily", font, {"Leland", "Bravura"}),
+        ("org.audiveris.omr.sheet.Profiles.defaultQuality", quality, {"Standard", "Synthetic", "Poor"}),
+    ):
+        if value is not None:
+            if value not in allowed:
+                raise ValueError("Unsupported Audiveris experiment setting.")
+            flags.extend(["-constant", f"{key}={value}"])
+    return flags
+
+
+def page_evidence(page):
+    """Propose evidence only for a user-requested trial on this specific page."""
+    from .pdf_resolution import staff_spacing
+    votes = Counter()
+    flags = pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_IMAGES
+    for block in page.get_text("dict", flags=flags)["blocks"]:
+        for line in block.get("lines", []):
+            for span in line["spans"]:
+                family = span["font"].split("+")[-1]
+                votes[family] += sum(0xE0A0 <= ord(c) <= 0xE0BF for c in span["text"])
+    positive = [name for name, count in votes.items() if count]
+    font = positive[0] if len(positive) == 1 and votes[positive[0]] >= 8 and positive[0] in ("Bravura", "Leland") else None
+    metadata = page.parent.metadata or {}
+    creator = " ".join(str(metadata.get(key, "")) for key in ("creator","producer")).casefold()
+    engraving_evidence = font is not None or any(name in creator for name in ("musescore","lilypond","sibelius","dorico","finale"))
+    quality = "Synthetic" if engraving_evidence and not page.get_image_info() and staff_spacing(page) is not None else None
+    return font, quality

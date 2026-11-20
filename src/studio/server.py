@@ -4,7 +4,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from . import accounts
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import base64
 import functools
 import hashlib
@@ -38,7 +38,8 @@ from PIL import Image
 from .scan_preprocess import prepare_for_omr
 from .pdf_meter import recover_opening_meter, recover_opening_tempo
 from .pdf_resolution import dense_score_dpi
-from .recognition_profile import recognition_flags
+from .recognition_profile import recognition_flags, experiment_flags, page_evidence
+from .scan_compare import compare, describe
 from .scan_options import selected_pages, repair_satb_book, repair_empty_run_tables
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -414,6 +415,29 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length))
             route = urlparse(self.path).path
             lib = self.workspace.library
+            if route == "/api/page-trial":
+                row = lib.get(payload["id"])
+                if row["source_type"] != "application/pdf" or not row["meta"].get("playbackReady", True) or row["meta"].get("pageTrial"):
+                    raise ValueError("Choose a recognized score with its original PDF.")
+                page = int(payload["page"])
+                pages = list(map(int, row["meta"].get("scanPages") or range(1, len(pdf_dimensions(row))+1)))
+                if page not in pages:
+                    raise ValueError("Choose a page included in the baseline scan.")
+                profile = payload.get("profile")
+                if profile not in ("evidence", "poor", "synthetic", "leland", "leland-synthetic", "bravura"):
+                    raise ValueError("Choose a trial profile.")
+                command = audiveris_path()
+                if not command:
+                    raise ValueError("Audiveris is unavailable.")
+                job = uuid.uuid4().hex
+                name = f'{row["meta"]["title"]} · page {page} trial'
+                with self.server.workspace_lock:
+                    if any(j.get("parent") == row["id"] and j["status"] == "running" for j in self.workspace.jobs.values()):
+                        raise ValueError("A page trial is already running for this score.")
+                    self.workspace.jobs[job] = {"status":"running", "parent":row["id"], "stage":0,
+                                                "started":time.time(), "name":name, "message":"Preparing one-page trial"}
+                threading.Thread(target=page_trial, args=(self.workspace, job, command, row, page, pages, profile), daemon=True).start()
+                return self.respond({"job":job, "name":name})
             if route == "/api/invite" and self.username == "studio":
                 return self.respond({"invite":accounts.invite(lib)})
             if route == "/api/logout":
@@ -508,6 +532,57 @@ def run_scan(server, job, *args):
         scan(server, job, *args)
 
 
+def page_trial(server, job, command, row, page, pages, profile):
+    """Keep an independent full-page candidate and its source coordinates. Never splice bars."""
+    import pymupdf
+    state = server.jobs[job]
+    def progress(stage, message):
+        state.update(stage=stage, message=message)
+    try:
+        with server.scan_lock if server.public_host else nullcontext():
+            with pymupdf.open(stream=row["source"], filetype="pdf") as original, pymupdf.open() as subset:
+                subset.insert_pdf(original, from_page=page-1, to_page=page-1)
+                data = subset.tobytes()
+                font, quality = page_evidence(subset[0]) if profile == "evidence" else {
+                    "poor": (None, "Poor"), "synthetic": (None,"Synthetic"),
+                    "leland": ("Leland", None), "leland-synthetic": ("Leland", "Synthetic"),
+                    "bravura": ("Bravura", None)}[profile]
+            flags = experiment_flags(font, quality)
+            if not flags:
+                raise ValueError("No reliable profile evidence on this page. Choose a manual trial profile.")
+            folder = server.library.path.parent / "scans" / job
+            folder.mkdir(parents=True)
+            source = folder / "page.pdf"
+            source.write_bytes(data)
+            progress(1, "Recognizing one complete page")
+            prior = row["meta"].get("scanOptions") or {}
+            flags += recognition_flags(prior.get("cueNotes", "auto"), data, ".pdf", [1])
+            if prior.get("language", "default") != "default":
+                flags.extend(["-constant", "org.audiveris.omr.text.Language.defaultSpecification="+prior["language"]])
+            if server.public_host:
+                flags.extend(["-constant", "org.audiveris.omr.util.OmrExecutors.useParallelism=false"])
+            with (folder / "recognition.log").open("w", encoding="utf8") as log:
+                prepared = prepare_for_omr(source)
+                dpi = dense_score_dpi(data, [1], 12_000_000 if server.public_host else 16_000_000) if source == prepared else None
+                if dpi:
+                    flags.extend(["-constant", f"org.audiveris.omr.image.ImageLoading.pdfResolution={dpi}"])
+                output, _ = recognize_book(command, prepared, folder, flags, [], prior.get("layout","auto"), log, progress)
+            if page == pages[0]:
+                output = recover_opening_tempo(output, data, 1)
+                output, _ = recover_opening_meter(output, data, 1)
+            baseline = describe(row["xml"], pages.index(page)+1, len(pages))
+            candidate = describe(output)
+            evidence = {"parent":row["id"], "revision":row["revision"], "page":page,
+                        "sourceSHA256":hashlib.sha256(row["source"]).hexdigest(),
+                        "box":[0, 0, 1000, 1000], "font":font, "quality":quality,
+                        "candidateParts":candidate[0], "comparison":compare(baseline, candidate) if baseline else None}
+            sid = server.library.add(output, {"title":state["name"], "origin":"Scan", "pageTrial":evidence,
+                                     "playbackReady":True, "reviewed":False}, data, "application/pdf")
+            state.update(status="done", stage=4, message="Page trial ready to compare", id=sid, finished=time.time())
+    except Exception as exc:
+        state.update(status="error", error=str(exc), message="Page trial could not finish", finished=time.time())
+
+
 def recognize_book(command, source, folder, settings, sheet_args, layout, log, progress):
     """Transcribe, then export the persisted book to preserve cross-page part assembly."""
     def run(args, check):
@@ -599,7 +674,8 @@ def scan(server, job, command, data, ext, sid=None, options=None):
         # A readable export is still unverified; keep its source for comparison.
         inspect(read_xml(output))
         if sid is None:
-            sid = server.library.add(output, {"origin": "Scan", "reviewed": False, "playbackReady": True}, data,
+            sid = server.library.add(output, {"origin": "Scan", "reviewed": False, "playbackReady": True,
+                                     "scanOptions": options, "scanPages":options.get("pages") or []}, data,
                                      "application/pdf" if ext == ".pdf" else mimetypes.guess_type(source.name)[0])
         else:
             # Scan completion must not overwrite concurrent annotation edits.
@@ -611,7 +687,7 @@ def scan(server, job, command, data, ext, sid=None, options=None):
                     server.library.remember(db, sid, row)
                 else:
                     db.execute("DELETE FROM redo_history WHERE score=?", (sid,))
-                meta.update(playbackReady=True, reviewed=False, reviewNote=layout_warning or "", scanPages=options.get("pages") or [])
+                meta.update(playbackReady=True, reviewed=False, reviewNote=layout_warning or "", scanOptions=options, scanPages=options.get("pages") or [])
                 db.execute("UPDATE scores SET xml=?,meta=?,updated=?,revision=revision+1 WHERE id=?", (xml_bytes(read_xml(output)),json.dumps(meta),time.time(),sid))
         progress(4, "Scan ready · check the result against the original", status="done", id=sid, finished=time.time())
     except Exception as exc:
