@@ -1,7 +1,62 @@
 """Recover omitted opening meters using positioned SMuFL glyphs in a PDF."""
 import xml.etree.ElementTree as ET
+import re
 
 from .document import read_xml, xml_bytes
+
+
+def recover_opening_tempo(output, pdf_data, page_number):
+    """Repair a dropped metronome dot when the original beat unit and numeral also match."""
+    import pymupdf
+    root = read_xml(output)
+    bar = root.find("part/measure")
+    if bar is None:
+        return output
+    directions = []
+    for el in bar:
+        if el.tag in ("note", "forward", "backup"):
+            break
+        if el.find("direction-type/metronome") is not None:
+            directions.append(el)
+    if len(directions) != 1:
+        return output
+    direction = directions[0]
+    mark = direction.find("direction-type/metronome")
+    bpm = mark.findtext("per-minute", "").strip()
+    if (not re.fullmatch(r"[1-9]\d{0,2}", bpm) or mark.findtext("beat-unit") != "quarter"
+            or len(mark) != 2 or direction.find("offset") is not None):
+        return output
+    sound = direction.find("sound")
+    if sound is not None and sound.get("tempo", bpm) != bpm:
+        return output
+    try:
+        with pymupdf.open(stream=pdf_data, filetype="pdf") as pdf:
+            pg = pdf[page_number-1]
+            spans = [s for b in pg.get_text("dict", flags=pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_IMAGES)["blocks"]
+                     for line in b.get("lines", []) for s in line["spans"]]
+    except (RuntimeError, ValueError, IndexError):
+        return output
+    clefs = [s for s in spans if s["font"].split("+")[-1] in ("Leland", "Bravura")
+             and any(c in s["text"] for c in "\ue050\ue05c\ue062")]
+    if not clefs:
+        return output
+    clef = min(clefs, key=lambda s:s["origin"][1])
+    x, y = clef["origin"]
+    size = clef["size"]
+    matches = [s for s in spans if s["font"].split("+")[-1] in ("LelandText", "BravuraText")
+               and s["text"] in ("\ueca5\uecb7", "\ueca6\uecb7")
+               and x-size <= s["origin"][0] <= x+2*size and y-4*size <= s["origin"][1] < y]
+    if len(matches) != 1:
+        return output
+    glyph = matches[0]
+    if not any(abs(s["origin"][1]-glyph["origin"][1]) < 1 and
+               abs(s["origin"][0]-glyph["bbox"][2]) < 2 and
+               re.fullmatch(r"\s*=\s*" + bpm + r"\s*", s["text"]) for s in spans):
+        return output
+    mark.insert(1, ET.Element("beat-unit-dot"))
+    if sound is not None:
+        sound.set("tempo", f"{int(bpm)*1.5:g}")
+    return xml_bytes(root)
 
 
 def _printed_signature(clef, signs, attacks):

@@ -31,15 +31,15 @@ from xml.etree.ElementTree import ParseError
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from .document import (MAX_BYTES, append_bar, edit_symbol, move_part, rename_part, edit_note, insert_after_note, place_note, edit_meter, engrave, inspect,
+from .document import (MAX_BYTES, append_bar, remove_tuplet, edit_symbol, move_part, rename_part, edit_note, insert_after_note, place_note, edit_meter, engrave, inspect,
                        new_score, read_xml, replace_bar, xml_bytes)
 
 from PIL import Image
 from .scan_preprocess import prepare_for_omr
-from .pdf_meter import recover_opening_meter
+from .pdf_meter import recover_opening_meter, recover_opening_tempo
 from .pdf_resolution import dense_score_dpi
 from .recognition_profile import recognition_flags
-from .scan_options import selected_pages, repair_satb_book
+from .scan_options import selected_pages, repair_satb_book, repair_empty_run_tables
 
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = Path(__file__).parent / "static"
@@ -221,8 +221,8 @@ def pdf_dimensions(row):
 
 
 @functools.lru_cache(maxsize=6)
-def rendered(data, mode, minor_do, solfa, paper=None):
-    return engrave(data, mode, minor_do, solfa, paper)
+def rendered(data, mode, minor_do, solfa, paper=None, compact=False):
+    return engrave(data, mode, minor_do, solfa, paper, compact)
 
 
 def seed(library):
@@ -363,7 +363,7 @@ class Handler(BaseHTTPRequestHandler):
                 sizes = pdf_dimensions(row)
                 chosen = [int(n) for n in row["meta"].get("scanPages",[]) if 1 <= int(n) <= len(sizes)]
                 paper = tuple(sizes[(chosen or [1])[0]-1]) if sizes else None
-                result = rendered(row["xml"], mode, q.get("minor", ["false"])[0] == "true", q.get("solfa", ["true"])[0] == "true", paper)
+                result = rendered(row["xml"], mode, q.get("minor", ["false"])[0] == "true", q.get("solfa", ["true"])[0] == "true", paper, q.get("compact")==["true"])
                 return self.respond({**result, "sourceSizes": sizes, "sourcePages": chosen, "id": row["id"], "meta": row["meta"], "revision": row["revision"], "hasSource": row["source"] is not None, "sourceType": row["source_type"], "title": row["meta"].get("title", result["title"])})
             if path.path.startswith("/api/bundle/"):
                 row = self.workspace.library.get(path.path.split("/")[-1])
@@ -469,6 +469,7 @@ class Handler(BaseHTTPRequestHandler):
                 if action == "note": data = edit_note(row["xml"], **payload["values"])
                 elif action == "place": data = place_note(row["xml"], **payload["values"])
                 elif action == "insert-note": data = insert_after_note(row["xml"], **payload["values"])
+                elif action == "remove-tuplet": data = remove_tuplet(row["xml"], **payload["values"])
                 elif action == "symbol": data = edit_symbol(row["xml"], **payload["values"])
                 elif action == "move-part":
                     values = payload["values"]
@@ -516,6 +517,7 @@ def recognize_book(command, source, folder, settings, sheet_args, layout, log, p
     book = next(folder.rglob("*.omr"), None)
     if book is None:
         raise ValueError("Audiveris did not produce a score book. Inspect the recognition log.")
+    repair_empty_run_tables(book)
     layout_warning = None
     if layout != "auto":
         try:
@@ -542,10 +544,10 @@ def scan(server, job, command, data, ext, sid=None, options=None):
     def progress(stage, message, **extra):
         server.jobs[job] = {**server.jobs[job], "stage": stage, "message": message, **extra}
     folder = server.library.path.parent / "scans" / job
-    folder.mkdir(parents=True, exist_ok=True)
     source = folder / f"scan{ext}"
-    source.write_bytes(data)
     try:
+        folder.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(data)
         with (folder / "recognition.log").open("w", encoding="utf-8") as log:
             progress(1, "Checking page orientation and staff alignment")
             try:
@@ -555,6 +557,8 @@ def scan(server, job, command, data, ext, sid=None, options=None):
                 recognition_source = source
             progress(1, "Recognizing music · large scores can take several minutes")
             flags_for_book = recognition_flags(options.get("cueNotes", "auto"), data, ext, options.get("pages"))
+            if getattr(server, "public_host", None):
+                flags_for_book.extend(["-constant", "org.audiveris.omr.util.OmrExecutors.useParallelism=false"])
             language = options.get("language","default")
             if language != "default":
                 flags_for_book.extend(["-constant", "org.audiveris.omr.text.Language.defaultSpecification=" + language])
@@ -585,6 +589,7 @@ def scan(server, job, command, data, ext, sid=None, options=None):
         meter = None
         if ext == ".pdf":
             pages = options.get("pages") or [1]
+            output = recover_opening_tempo(output, data, int(pages[0]))
             output, meter = recover_opening_meter(output, data, int(pages[0]))
         if meter:
             server.jobs[job]["meterEvidence"] = f"Opening {meter[0]}/{meter[1]} recovered from matching printed meter symbols."

@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+from zipfile import ZipFile
 
 import pymupdf
 
@@ -44,7 +45,8 @@ def test_dense_scan_falls_back_after_empty_export(tmp_path, monkeypatch):
     def engine(args, **kwargs):
         if "-save" in args:
             attempts.append(args)
-            (Path(args[args.index("-output") + 1]) / "scan.omr").touch()
+            with ZipFile(Path(args[args.index("-output") + 1]) / "scan.omr", "w"):
+                pass
         else:
             result = new_score() if len(attempts) == 2 else b"<score-partwise><part><measure/></part></score-partwise>"
             Path(args[-1]).with_suffix(".musicxml").write_bytes(result)

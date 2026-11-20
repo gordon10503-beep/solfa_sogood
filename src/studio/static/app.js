@@ -64,7 +64,7 @@ async function openScore(id, preserve=false) {
   pause();state.scrollStart=null;$("scroll-only").textContent="▷ Scroll without sound";
   const oldPosition=preserve?state.position:0, oldScroll=preserve?$("score-scroll").scrollTop:0;
   busy(true,"Engraving your score…");
-  const result=await api(`/api/score/${id}?mode=${$("solfa-mode").value}&minor=${$("minor-do").checked}&solfa=${$("solfa").checked}`);
+  const result=await api(`/api/score/${id}?mode=${$("solfa-mode").value}&minor=${$("minor-do").checked}&compact=${$("compact-staves").checked}&solfa=${$("solfa").checked}`);
   if(generation!==state.openGeneration)return;
   state.score=result;setupLoop(result);state.playbackCursor=new PlaybackCursor(result.events,result.measureTimes);activeHighlightIds=new Set();activeBarElement=null;
   $("reader-format").querySelectorAll("option").forEach(o=>{if(o.value!=="notation")o.disabled=result.sourceType!=="application/pdf";});
@@ -75,7 +75,7 @@ async function openScore(id, preserve=false) {
   if(!preserve) {
     const practice=result.meta.practice||{};
     $("tempo").value=practice.tempo||Math.round(result.baseTempo); state.currentMeasure=0;
-    $("follow").checked=practice.follow??true;$("scroll-mode").value=practice.scrollMode||"score";
+    $("read-follow").checked=$("follow").checked=practice.follow??true;$("scroll-mode").value=practice.scrollMode||"score";
     $("scroll-duration").value=practice.scrollDuration||120;$("scroll-duration-field").hidden=$("scroll-mode").value!=="timed";
   }
   state.speed=Number($("tempo").value)/result.baseTempo;
@@ -292,6 +292,21 @@ function renderIssues() {
   const groups = [...bars].sort(([a], [b]) => a-b).map(([bar, entries], index) =>
     `<details ${index === 0 ? "open" : ""}><summary>Bar ${bar+1} · ${entries.length} to check</summary>${entries.join("")}</details>`);
   $("issues").innerHTML = [...notices, ...groups].join("") || '<p class="empty-hint">No structural warnings. Compare pitches and symbols with the original.</p>';
+  const tuplets=Object.values(state.score.notes).filter(n=>n.tupletStart);
+  if(tuplets.length && state.score.meta.origin==="Scan"){
+    const panel=document.createElement("details");
+    panel.innerHTML="<summary>Check recognized tuplets ("+tuplets.length+")</summary>";
+    for(const n of tuplets){
+      const jump=document.createElement("button"),restore=document.createElement("button");
+      jump.className=restore.className="button small";
+      jump.textContent=state.score.parts[n.part].name+" · Bar "+(n.measure+1)+" · "+n.tupletStart+"-tuplet";
+      jump.onclick=()=>jumpBar(n.measure,n.part);
+      restore.textContent="Use regular notes";
+      restore.onclick=run(()=>edit("remove-tuplet",{nid:n.id}));
+      const row=document.createElement("div");row.append(jump,restore);panel.append(row);
+    }
+    $("issues").prepend(panel);
+  }
   if(state.score.engravingLog) { const details=document.createElement("details");details.innerHTML='<summary class="hint">Engraver notices</summary>';const p=document.createElement("p");p.className="hint";p.textContent=state.score.engravingLog;details.appendChild(p);$("issues").appendChild(details); }
   $("issues").querySelectorAll("[data-issue]").forEach(b=>b.onclick=()=>{const i=issues[+b.dataset.issue];if(i.measure!==undefined){jumpBar(i.measure,i.part);renderRhythmReport(i.measure);$("compose-part").value=i.part;fillBars(i.measure);$("meter-bar").value=i.measure+1;if(i.code==="missing-meter"){$("meter-bar").closest("details").open=true;$("meter-beats").focus();}else{setView("compose");$("phrase").closest("details").open=true;toast("This part and bar are selected. Click a note to change pitch, or use the bar composer to replace its rhythm.");}}});
 }
@@ -632,7 +647,21 @@ on("xml-save","click",async()=>{await edit("xml",undefined,{xml:$("xml-editor").
 on("source-btn","click",()=>{if(state.score.hasSource){$("source-frame").src=`/api/source/${state.score.id}`;$("source-dialog").showModal();}});
 on("reviewed","change",async()=>{await queueMeta({reviewed:$("reviewed").checked});renderIssues();$("scan-banner").hidden=state.score.meta.reviewed||state.score.meta.origin!=="Scan";});
 on("scroll-mode","change",async()=>{$("scroll-duration-field").hidden=$("scroll-mode").value!=="timed";await savePractice();});
-on("follow","change",savePractice);
+function changeFollow(event) {
+  const enabled=event.target.checked;
+  $("follow").checked=$("read-follow").checked=enabled;
+  lastFollow="";
+  if(!enabled){
+    state.scrollStart=null;
+    $("scroll-only").textContent="▷ Scroll without sound";
+    const pane=$("score-scroll");
+    pane.scrollTo({top:pane.scrollTop,left:pane.scrollLeft,behavior:"instant"});
+  }
+  return savePractice();
+}
+on("follow","change",changeFollow);
+on("read-follow","change",changeFollow);
+on("compact-staves","change",()=>{if(state.score)run(()=>openScore(state.score.id,true))();});
 on("scroll-duration","change",async()=>{$("scroll-duration").value=Math.max(5,Math.min(7200,+$("scroll-duration").value||120));await savePractice();});
 on("scroll-only","click",()=>{if(state.scrollStart!==null){state.scrollStart=null;$("scroll-only").textContent="▷ Scroll without sound";return;}pause();state.scrollStart=performance.now();state.scrollOrigin=$("score-scroll").scrollTop;$("scroll-only").textContent="Ⅱ Pause scrolling";});
 on("play","click",play);
@@ -767,9 +796,17 @@ function syncScanJobs(jobs){
 }
 function renderScanJobs(){
   const visible=[...scanJobs.values()].filter(j=>!j.dismissed);$('scan-progress').hidden=!visible.length;
-  $('scan-progress').innerHTML=visible.map(j=>`<div class="scan-job"><div class="scan-job-title"><strong>${esc(j.name||'Score scan')}</strong><span>${Math.floor((j.elapsed||0)/60)}m ${(j.elapsed||0)%60}s</span>${j.status!=='running'?`<button class="icon-button" data-dismiss-scan="${j.job}" aria-label="Dismiss scan status">×</button>`:''}</div><p role="status">${esc(j.message||j.error||'Scanning…')}</p><progress max="4" value="${j.stage||0}" aria-label="Scan stages completed"></progress><small>${j.status==='error'?esc(j.error):esc(j.detail||(['Preparing','Recognizing','Exporting','Checking','Ready'][j.stage||0]))}${j.status==='running'?' · Stage progress; timing varies by score':''}</small></div>`).join('');
+  const running=visible.filter(j=>j.status==="running").length;
+  $("scan-summary-text").textContent=running?("Scanning "+running+(running===1?" score":" scores")):(visible.some(j=>j.status==="error")?"Scan needs attention":"Scan complete");
+  $('scan-job-list').innerHTML=visible.map(j=>`<div class="scan-job"><div class="scan-job-title"><strong>${esc(j.name||'Score scan')}</strong><span>${Math.floor((j.elapsed||0)/60)}m ${(j.elapsed||0)%60}s</span>${j.status!=='running'?`<button class="icon-button" data-dismiss-scan="${j.job}" aria-label="Dismiss scan status">×</button>`:''}</div><p role="status">${esc(j.message||j.error||'Scanning…')}</p><progress max="4" value="${j.stage||0}" aria-label="Scan stages completed"></progress><small>${j.status==='error'?esc(j.error):esc(j.detail||(['Preparing','Recognizing','Exporting','Checking','Ready'][j.stage||0]))}${j.status==='running'?' · Stage progress; timing varies by score':''}</small></div>`).join('');
   $('scan-progress').querySelectorAll('[data-dismiss-scan]').forEach(b=>b.onclick=()=>{scanJobs.get(b.dataset.dismissScan).dismissed=true;renderScanJobs();});
 }
+on("scan-collapse","click",()=>{
+  const list=$("scan-job-list"),button=$("scan-collapse");
+  list.hidden=!list.hidden;
+  button.setAttribute("aria-expanded",String(!list.hidden));
+  button.textContent=list.hidden?"Expand ▾":"Collapse ▴";
+});
 function scheduleScanPoll(){if(!scanPollTimer&&[...scanJobs.values()].some(j=>j.status==='running'))scanPollTimer=setTimeout(pollScans,2000);}
 async function pollScans(){
   try{

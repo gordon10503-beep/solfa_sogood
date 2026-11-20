@@ -21,6 +21,25 @@ def selected_pages(value):
     return [str(p) for p in sorted(pages)]
 
 
+def repair_empty_run_tables(path):
+    """Represent zero-column glyphs by one blank column for Audiveris's JAXB reader."""
+    empty = re.compile(rb'<run-table orientation="VERTICAL" width="0" height="([0-9]+)"\s*/>')
+    replacements = {}
+    with zipfile.ZipFile(path) as source:
+        for name in source.namelist():
+            if re.fullmatch(r"sheet#\d+/sheet#\d+\.xml", name):
+                sheet, count = empty.subn(rb'<run-table orientation="VERTICAL" width="1" height="\1"><runs/></run-table>', source.read(name))
+                if count:
+                    replacements[name] = sheet
+        if not replacements:
+            return
+        temporary = path.with_suffix(".fixed.tmp")
+        with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as target:
+            for entry in source.infolist():
+                target.writestr(entry, replacements[entry.filename] if entry.filename in replacements else source.read(entry))
+    temporary.replace(path)
+
+
 def repair_satb_book(path, layout="satb-piano"):
     """Only for an explicitly selected five-part SATB + piano layout.
 

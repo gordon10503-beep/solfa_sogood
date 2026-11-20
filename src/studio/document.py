@@ -132,7 +132,14 @@ def inspect(root, mode="movable", minor_do=False):
                             bpm = float(met.findtext("per-minute")) * DURATIONS.get(met.findtext("beat-unit"), 1) * sum(.5**d for d in range(len(met.findall("beat-unit-dot"))+1))
                         except (TypeError, ValueError): bpm = None
                     if bpm is not None and 0 < float(bpm) <= 1000:
-                        tempos.append({"offset": cursor + float(el.findtext("offset", "0")) / divisions, "bpm": float(bpm)})
+                        # MusicXML sound offsets override the direction's visual
+                        # placement. A direction offset affects playback only
+                        # when explicitly marked sound="yes".
+                        offset = sound.find("offset") if sound is not None else None
+                        if offset is None:
+                            offset = el.find("offset[@sound='yes']")
+                        delta = float(offset.text) / divisions if offset is not None else 0.
+                        tempos.append({"offset": cursor + delta, "bpm": float(bpm)})
                 elif el.tag in ("backup", "forward"):
                     cursor += float(el.findtext("duration", "0")) / divisions * (-1 if el.tag == "backup" else 1)
                     if cursor < -1e-5:
@@ -178,6 +185,8 @@ def inspect(root, mode="movable", minor_do=False):
                                   "tieStart": el.find("tie[@type='start']") is not None or el.find("notations/tied[@type='start']") is not None,
                                   "tieStop": el.find("tie[@type='stop']") is not None or el.find("notations/tied[@type='stop']") is not None,
                                   "midi": 12 * (octave + 1) + Note.STEP_TO_PC.get(step, 0) + alter + transpositions.get(el.findtext("staff", "1"), transpositions.get("1", 0))}
+                    if el.find("notations/tuplet[@type='start']") is not None:
+                        notes[nid]["tupletStart"] = el.findtext("time-modification/actual-notes", "?")
                     if grace:
                         issues.append({"part": pi, "measure": mi, "message": "Grace note is displayed but omitted from timed playback; interpret its timing manually."})
                     if not grace and dur == 0:
@@ -260,7 +269,7 @@ def prepare_render_structure(root, info):
         info["issues"].append({"code": "broken-endings", "message": "Recognition produced incomplete or overlapping repeat endings. Their brackets are hidden in the display to keep opening bars visible. Saved notation is unchanged; repeat playback still needs review."})
 
 
-def engrave(data, mode="movable", minor_do=False, solfa=True, paper=None):
+def engrave(data, mode="movable", minor_do=False, solfa=True, paper=None, compact=False):
     import verovio
     root = read_xml(data)
     info = inspect(root, mode, minor_do)
@@ -270,6 +279,8 @@ def engrave(data, mode="movable", minor_do=False, solfa=True, paper=None):
     for pi, p in enumerate(root.findall("part")):
         for mi, m in enumerate(p.findall("measure")):
             tuplet_run = []
+            explicit_voices = {(n.findtext("staff", "1"), n.findtext("voice", "1"))
+                               for n in m.findall("note") if n.find("notations/tuplet") is not None}
             for ni, n in enumerate(m.findall("note")):
                 nid = f"ss-p{pi}-m{mi}-n{ni}"
                 n.set("id", nid)
@@ -284,8 +295,13 @@ def engrave(data, mode="movable", minor_do=False, solfa=True, paper=None):
                 # MusicXML allows a tuplet ratio without explicit bracket
                 # notation. Supply complete simple groups in the render copy.
                 tm = n.find("time-modification")
-                if tm is not None and n.find("notations/tuplet") is None and n.find("chord") is None:
-                    signature = (tm.findtext("actual-notes"), tm.findtext("normal-notes"), n.findtext("voice", "1"), n.findtext("type"))
+                voice = (n.findtext("staff", "1"), n.findtext("voice", "1"))
+                if tm is not None and voice not in explicit_voices and n.find("chord") is None:
+                    signature = (tm.findtext("actual-notes"), tm.findtext("normal-notes"), voice, n.findtext("type"), len(n.findall("dot")))
+                    expected = DURATIONS.get(signature[3], 0) * sum(.5**i for i in range(signature[4]+1))
+                    if abs(expected * int(signature[1]) / int(signature[0]) - info["notes"][nid]["duration"]) > 1e-5:
+                        tuplet_run = []
+                        continue
                     if tuplet_run and tuplet_run[0][0] != signature: tuplet_run = []
                     tuplet_run.append((signature, n))
                     if len(tuplet_run) == int(signature[0]):
@@ -302,11 +318,14 @@ def engrave(data, mode="movable", minor_do=False, solfa=True, paper=None):
         encoded = paper and root.find(".//print[@new-page='yes']") is not None
         tk.setOptions({"pageWidth": width, "pageHeight": height, "scale": 45,
                        "adjustPageHeight": not paper, "breaks": "encoded" if encoded else "auto", "footer": "none",
-                       "header": "none", "spacingStaff": 16, "spacingSystem": 12})
+                       "condenseFirstPage": compact, "header": "none", "spacingStaff": 16, "spacingSystem": 12})
         if not tk.loadData(xml_bytes(root).decode()):
             raise ValueError("The engraving engine could not read this score. Check MusicXML notation.")
         logs = [tk.getLog().strip()]
         mei = fromstring(tk.getMEI())
+        definition = mei.find(f".//{{{MEI}}}scoreDef")
+        if compact and definition is not None and len(info["parts"]) > 1 and playback["events"]:
+            definition.set("optimize", "true")
         staff_by_note = {n.get(XML_ID): staff.get("n", "1")
                          for staff in mei.iter(f"{{{MEI}}}staff")
                          for n in staff.iter(f"{{{MEI}}}note")}
@@ -608,6 +627,75 @@ def edit_symbol(data, nid, symbol):
         for item in existing: parent.remove(item)
     else: child(parent, symbol)
     return xml_bytes(root)
+
+
+def remove_tuplet(data, nid):
+    """Restore written note lengths in one explicitly marked, single-voice group."""
+    root = read_xml(data)
+    item = inspect(root)["notes"].get(nid)
+    if item is None:
+        raise ValueError("Choose the first note of a tuplet.")
+    measures = root.findall("part")[item["part"]].findall("measure")
+    measure = measures[item["measure"]]
+    notes = measure.findall("note")
+    first = notes[item["index"]]
+    opening = first.find("notations/tuplet[@type='start']")
+    if opening is None:
+        raise ValueError("This group needs voice-aware correction in the MusicXML editor.")
+    divisions = Fraction(1)
+    for bar in measures[:item["measure"] + 1]:
+        for el in bar:
+            if el is first:
+                break
+            if el.find("divisions") is not None:
+                divisions = Fraction(el.findtext("divisions"))
+    number = opening.get("number", "1")
+    ratio = (first.findtext("time-modification/actual-notes"), first.findtext("time-modification/normal-notes"))
+    cursor = Fraction(0)
+    for el in measure:
+        if el is first:
+            break
+        if el.tag == "backup":
+            cursor -= Fraction(el.findtext("duration"))
+        elif el.tag == "forward" or (el.tag == "note" and el.find("chord") is None):
+            cursor += Fraction(el.findtext("duration", "0"))
+    delta = Fraction(0)
+    children = list(measure)
+    for pos in range(children.index(first), len(children)):
+        note = children[pos]
+        if note.tag != "note":
+            break
+        markers = note.findall("notations/tuplet")
+        if (note.find("time-modification") is None or note.find("chord") is not None or
+                note.findtext("voice", "1") != first.findtext("voice", "1") or
+                note.findtext("staff", "1") != first.findtext("staff", "1") or
+                (note.findtext("time-modification/actual-notes"), note.findtext("time-modification/normal-notes")) != ratio or
+                any(m.get("number", "1") != number or (m.get("type") == "start" and m is not opening) for m in markers)):
+            break
+        ticks = divisions * Fraction(DURATIONS.get(note.findtext("type"), 0)) * sum(
+            Fraction(1, 2**i) for i in range(len(note.findall("dot")) + 1))
+        if ticks <= 0 or ticks.denominator != 1 or note.find("duration") is None:
+            raise ValueError("The written length needs a different rhythmic resolution. Use the MusicXML editor.")
+        original = Fraction(note.findtext("duration"))
+        delta += ticks - original
+        cursor += original
+        note.find("duration").text = str(ticks)
+        note.remove(note.find("time-modification"))
+        for mark in markers:
+            note.find("notations").remove(mark)
+        if any(m.get("type") == "stop" for m in markers):
+            for el in children[pos+1:]:
+                if el.tag == "attributes" and el.find("divisions") is not None:
+                    raise ValueError("This bar changes rhythmic resolution. Use the MusicXML editor.")
+                if el.tag == "backup":
+                    if Fraction(el.findtext("duration")) != cursor or cursor + delta <= 0:
+                        raise ValueError("This voice overlaps a partial backup. Use the MusicXML editor.")
+                    el.find("duration").text = str(cursor + delta)
+                    break
+                if el.tag == "forward" or (el.tag == "note" and el.find("chord") is None):
+                    cursor += Fraction(el.findtext("duration", "0"))
+            return xml_bytes(root)
+    raise ValueError("This tuplet overlaps another group or crosses a bar. Use the MusicXML editor.")
 
 
 def rename_part(data, part, name):

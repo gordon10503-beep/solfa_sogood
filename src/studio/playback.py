@@ -56,21 +56,30 @@ def build_playback(root, info):
         notes_by_bar.setdefault(n["measure"], []).append(n)
     q = 0.
     quarter_events, measure_times, tempos, ties = [], [], {0.: 120.}, {}
-    for mi in order:
+    tempo_on_entry = {}
+    current_tempo = tempos[0.]
+    for position, mi in enumerate(order):
         bars = [p["measures"][mi] for p in parts if mi < len(p["measures"])]
         expected = max(b["length"] for b in bars)
         extent = max(b["extent"] for b in bars)
         pickup = mi == 0 or all(b["implicit"] for b in bars)
         length = extent if pickup and 0 < extent < expected else max(expected, extent)
         measure_times.append({"id": f"ss-measure-{mi}", "qstamp": q, "measure": mi})
+        # A repeat can begin several bars after the tempo was printed. Restore
+        # its inherited pace, even if the first ending changed it mid-phrase.
+        if position and mi <= order[position - 1] and mi in tempo_on_entry:
+            current_tempo = tempo_on_entry[mi]
+            tempos[q] = current_tempo
+        tempo_on_entry.setdefault(mi, current_tempo)
         # Most MusicXML puts tempo on part 1; other parts can supply missing
         # markings. Conflicting values at the same position use the top part.
         local_tempos = {}
         for bar in bars:
             for t in bar["tempos"]:
                 local_tempos.setdefault(max(0, t["offset"]), t["bpm"])
-        for offset, bpm in local_tempos.items():
-            tempos[q + offset] = bpm
+        for offset in sorted(local_tempos):
+            current_tempo = local_tempos[offset]
+            tempos[q + min(offset, length)] = current_tempo
         for n in notes_by_bar.get(mi, []):
             if not n["pitched"] or n["grace"] or n["duration"] <= 0:
                 continue

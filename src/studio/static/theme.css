@@ -123,3 +123,5 @@ body:is([data-page=compose],[data-page=review]) #pages .note{touch-action:none;c
 #instrument-dialog{width:min(440px,94vw);max-height:80dvh;overflow:auto}
 #instrument-dialog .mixer-part{display:block;width:100%;margin-inline:0}
 @media(max-width:700px){.workbar .notation-options{flex-wrap:nowrap}.workbar .tabs{flex:1 1 0}.transport #keyboard-btn{display:inline-flex}}
+
+#scan-progress{padding:4px 16px}.scan-summary{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px}.scan-summary .button{padding:4px 10px}.scan-job{margin-top:5px}

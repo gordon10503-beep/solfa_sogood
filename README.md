@@ -43,6 +43,12 @@ On PDFs with embedded Bravura or Leland music symbols, Studio can also recover a
 
 The optional [`score-layout-preflight` skill](skills/score-layout-preflight/SKILL.md) helps an assistant map systems and parts, review proposed boundaries and export checked system crops. It supports arbitrary ensembles, including orchestral layouts. It is not connected to the Studio Scan button, and its effect on recognition accuracy has not yet been benchmarked. See the [recognition roadmap](docs/RECOGNITION_ROADMAP.md).
 
+### Local choir benchmarks
+
+Run `python -m benchmarks.choir "path/to/score.pdf"` inside the Studio environment. The runner recognizes the two test editions by SHA-256, creates a separate temporary library, and reports part lengths, opening tempo, recognized tuplet groups and elapsed time. The five-page middle benchmark uses Automatic grouping. The fourteen-page advanced benchmark uses SATB + piano and checks the printed 55 bars and opening dotted quarter = 72 (quarter = 108). Counts describe the export. Pitch, lyrics and later tempo directions still require comparison with the PDF.
+
+In **Reading options**, toggle **Follow the music** or **Hide silent staves**. Turn off the latter to see rests while editing. In **Check score → Check recognized tuplets**, select a group to locate its bar. **Use regular notes** removes a simple false tuplet and restores the written note lengths. Undo restores the group. The scan notification can be collapsed while recognition continues.
+
 ## Local data and limitations
 
 Scores, original imports, annotations and history are stored under `data/`, which is excluded from Git. Back up that directory to preserve your library. The desktop launcher listens on the local computer. For a shared browser workspace use the hosted setup below. Some complex notation, repeat navigation and expressive playback require manual review. See the [Studio guide](docs/STUDIO.md) and [platform plan](docs/PLATFORM.md) for details.
