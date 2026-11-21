@@ -147,12 +147,15 @@ body:is([data-page=compose],[data-page=review]) #pages .note{touch-action:none;c
 #spread-tools,#spread-play,body:not([data-page=original]) #spread-actions{display:none}
 @media screen{
 body[data-page=original] #score-scroll.spread-focus{position:fixed;inset:0;z-index:50;width:100%;height:100dvh;box-sizing:border-box;padding:0;background:white;overflow:auto;scroll-behavior:auto}
-.spread-focus #pdf-controls{position:fixed;top:env(safe-area-inset-top,0px);right:env(safe-area-inset-right,0px);margin:4px;border-radius:9px;box-shadow:0 2px 10px #17213b24;max-width:calc(100% - 8px)}
+.spread-focus #pdf-controls{position:sticky;top:0;display:flex;align-items:center;width:100%;box-sizing:border-box;margin:0;padding:env(safe-area-inset-top,0px) max(6px,env(safe-area-inset-right,0px)) 0 max(6px,env(safe-area-inset-left,0px));height:calc(50px + env(safe-area-inset-top,0px));gap:8px;background:white;border-bottom:1px solid var(--line)}
+.spread-focus #spread-actions{flex:none}
+.spread-focus .pdf-tools{min-width:0;flex:1;flex-wrap:nowrap;overflow-x:auto;padding:0;border-radius:0}
+.spread-focus .pdf-tools>*{flex:none;white-space:nowrap}
 .spread-focus #spread-tools,.spread-focus #spread-play{display:inline-flex}
 .spread-focus #spread-actions button{min-height:40px}
 .spread-focus:not(.spread-tools-open) .pdf-tools,.spread-focus #pdf-controls .hint,.spread-focus #scan-banner,.spread-focus .paper-caption{display:none}
-.spread-focus #pdf-pages .pdf-spread{gap:2px;align-items:center;justify-items:center;min-height:100dvh;margin:0}
-.spread-focus #pdf-pages .pdf-sheet{max-width:min(100%,calc(100dvh * var(--sheet-ratio,.707)));box-shadow:none}
+.spread-focus #pdf-pages .pdf-spread{gap:2px;align-items:center;justify-items:center;min-height:calc(100dvh - 50px - env(safe-area-inset-top,0px));margin:0}
+.spread-focus #pdf-pages .pdf-sheet{max-width:min(100%,calc((100dvh - 50px - env(safe-area-inset-top,0px)) * var(--sheet-ratio,.707)));box-shadow:none}
 .spread-focus #pdf-pages.horizontal{gap:0}
 }
 
@@ -173,3 +176,10 @@ body[data-page=original] #score-scroll.spread-focus{position:fixed;inset:0;z-ind
   #score-view>#pdf-controls .hint{display:none}
 }
 @media(pointer:coarse){#score-view .workbar .reader-action,#score-view .workbar .tab{min-height:44px}}
+
+.score-item>.score-card{display:flex;flex-direction:column;justify-content:flex-start;align-items:stretch}
+.score-card .card-art{flex-shrink:0}
+#pdf-controls :is(button,select,#pdf-page-label){font-family:system-ui,sans-serif;font-size:14px;font-weight:650}
+#pdf-controls button:has(.control-icon){align-items:center;justify-content:center;min-width:44px;height:44px;vertical-align:middle}
+.control-icon{width:20px;height:20px;vertical-align:middle}
+#spread-focus[aria-pressed=false] .exit-icon,#spread-focus[aria-pressed=true] .expand-icon,#spread-play[aria-label="Pause score"] .play-icon,#spread-play[aria-label="Play score"] .pause-icon{display:none}

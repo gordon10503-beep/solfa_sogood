@@ -93,7 +93,9 @@ window.StudioPDF = (() => {
     pane.classList.remove('spread-tools-open');
     $('spread-tools').setAttribute('aria-expanded','false');
     $('spread-focus').setAttribute('aria-pressed',String(enabled));
-    $('spread-focus').textContent=enabled?'Exit full-page view':'Full-page view';
+    const label=enabled?'Exit full-page view':'Full-page view';
+    $('spread-focus').title=label;
+    $('spread-focus').setAttribute('aria-label',label);
     if(enabled){
       previousLayout=$('pdf-layout').value;
       if(innerWidth>innerHeight)$('pdf-layout').value='2';

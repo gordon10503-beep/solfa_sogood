@@ -448,7 +448,7 @@ async function play() {
   if(state.loop && (state.position<state.loop.start || state.position>=state.loop.end))state.position=state.loop.start;
   beginPass(state.audio.currentTime+.04);
   state.metroNext=state.audio.currentTime+.04;state.metroCount=0;
-  $("play").textContent="Ⅱ";$("play").setAttribute("aria-label","Pause score");ensureScheduler();schedule();
+  $("play").textContent="Ⅱ";$("play").setAttribute("aria-label","Pause score");$("spread-play").title="Pause score";$("spread-play").setAttribute("aria-label","Pause score");ensureScheduler();schedule();
 }
 function beginPass(at) {
   state.nextQuarter=undefined;
@@ -538,7 +538,7 @@ function schedule() {
 }
 function pause() {
   if(state.playing)state.position=position();state.playing=false;state.nextQuarter=undefined;silence();
-  $("play").textContent="▶";$("play").setAttribute("aria-label","Play score");
+  $("play").textContent="▶";$("play").setAttribute("aria-label","Play score");$("spread-play").title="Play score";$("spread-play").setAttribute("aria-label","Play score");
   if(state.audio)state.metroNext=state.audio.currentTime+.05;
 }
 function updateTransport() {
