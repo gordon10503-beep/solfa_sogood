@@ -67,9 +67,11 @@ async function openScore(id, preserve=false, initialView="read") {
   const oldPosition=preserve?state.position:0, oldScroll=preserve?$("score-scroll").scrollTop:0;
   ensureNotation=null;
   busy(true,"Opening score…");
-  const scoreUrl=`/api/score/${id}?mode=${$("solfa-mode").value}&tenor=${encodeURIComponent(localStorage.getItem("tenor-clef-"+id)||"auto")}&minor=${$("minor-do").checked}&compact=${$("compact-staves").checked}&solfa=${$("solfa").checked}`;
+  const lyricPreference=localStorage.getItem("notation-lyrics-"+id)||"auto";
+  const scoreUrl=`/api/score/${id}?mode=${$("solfa-mode").value}&lyrics=${lyricPreference}&tenor=${encodeURIComponent(localStorage.getItem("tenor-clef-"+id)||"auto")}&minor=${$("minor-do").checked}&compact=${$("compact-staves").checked}&solfa=${$("solfa").checked}`;
   const result=await api(scoreUrl+(!preserve||state.view==="original"?"&reader=pdf":""));
   if(generation!==state.openGeneration)return;
+  $("notation-lyrics").checked=lyricPreference==="auto"?result.meta.origin!=="Scan":lyricPreference==="true";
   state.score=result;setupLoop(result);state.playbackCursor=new PlaybackCursor(result.events,result.measureTimes);activeHighlightIds=new Set();activeBarElement=null;
   $("reader-format").querySelectorAll("option").forEach(o=>{if(o.value!=="notation")o.disabled=result.sourceType!=="application/pdf";});
   document.querySelector('[data-view="original"]').hidden=result.sourceType!=="application/pdf";
@@ -665,6 +667,11 @@ on("new-form","submit",async e=>{e.preventDefault();const data=Object.fromEntrie
 on("text-form","submit",async e=>{e.preventDefault();const value=$("text-value").value.trim();if(!value)return;await textCallback(value);$("text-dialog").close();});
 document.querySelectorAll(".close-dialog").forEach(b=>b.onclick=()=>b.closest("dialog").close());
 document.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>setView(b.dataset.view));
+on("notation-lyrics","change",()=>{
+  if(!state.score)return;
+  localStorage.setItem("notation-lyrics-"+state.score.id,String($("notation-lyrics").checked));
+  return openScore(state.score.id,true);
+});
 for(const id of ["solfa","solfa-mode","minor-do"])on(id,"change",()=>state.score&&openScore(state.score.id,true));
 on("zoom","change",()=>$("pages").style.setProperty("--zoom",$("zoom").value));
 on("import-btn","click",()=>$("file-input").click());

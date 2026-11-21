@@ -37,3 +37,22 @@ def test_mid_measure_tempo_uses_playback_offset(direction, expected):
     bar.insert(1, ET.fromstring(direction))
     result = build_playback(root, inspect(root))
     assert result["duration"] == pytest.approx(expected * .5 + (4 - expected))
+
+
+@pytest.mark.parametrize("stop, attacks", [(True, 1), (False, 2)])
+def test_vocal_tie_over_overfilled_accompaniment(stop, attacks):
+    root = read_xml(new_score(template="satb", bars=2))
+    a, b = root.findall("part")[0].findall("measure/note")
+    for note in (a, b):
+        note.remove(note.find("rest"))
+        note.insert(0, ET.fromstring("<pitch><step>C</step><octave>4</octave></pitch>"))
+    ET.SubElement(a, "tie", type="start")
+    if stop:
+        ET.SubElement(b, "tie", type="stop")
+    accompaniment = root.findall("part")[-1].find("measure/note/duration")
+    accompaniment.text = str(int(accompaniment.text)*2)
+    result = build_playback(root, inspect(root))
+    events = [e for e in result["events"] if e["part"] == 0]
+    assert len(events) == attacks
+    if stop:
+        assert events[0]["duration"] == pytest.approx(result["duration"])

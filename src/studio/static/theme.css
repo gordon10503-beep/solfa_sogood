@@ -183,3 +183,15 @@ body[data-page=original] #score-scroll.spread-focus{position:fixed;inset:0;z-ind
 #pdf-controls button:has(.control-icon){align-items:center;justify-content:center;min-width:44px;height:44px;vertical-align:middle}
 .control-icon{width:20px;height:20px;vertical-align:middle}
 #spread-focus[aria-pressed=false] .exit-icon,#spread-focus[aria-pressed=true] .expand-icon,#spread-play[aria-label="Pause score"] .play-icon,#spread-play[aria-label="Play score"] .pause-icon{display:none}
+
+#pdf-pages{touch-action:pan-y pinch-zoom;user-select:none}
+#pdf-turns{position:fixed;z-index:3;display:flex;align-items:center;justify-content:space-between;height:0;pointer-events:none}
+#pdf-turns button{pointer-events:auto;display:grid;place-items:center;width:48px;height:52px;margin:0 4px;border-radius:14px;background:white;color:var(--ink);box-shadow:0 2px 10px #17213b26}
+#pdf-turns button:disabled{visibility:hidden}
+@media(hover:hover) and (pointer:fine){
+  #pdf-turns button{opacity:0;transition:opacity .15s}
+  #pdf-turns button::before{content:"";position:absolute;inset:-14px}
+  #pdf-turns button{position:relative}
+  #pdf-turns button:is(:hover,:focus-visible){opacity:1}
+}
+@media print{#pdf-turns{display:none}}

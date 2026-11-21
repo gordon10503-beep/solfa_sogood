@@ -272,7 +272,7 @@ def prepare_render_structure(root, info):
         info["issues"].append({"code": "broken-endings", "message": "Recognition produced incomplete or overlapping repeat endings. Their brackets are hidden in the display to keep opening bars visible. Saved notation is unchanged; repeat playback still needs review."})
 
 
-def engrave(data, mode="movable", minor_do=False, solfa=True, paper=None, compact=False, tenor_part="auto"):
+def engrave(data, mode="movable", minor_do=False, solfa=True, paper=None, compact=False, tenor_part="auto", show_lyrics=True):
     import verovio
     root = read_xml(data)
     info = inspect(root, mode, minor_do)
@@ -287,7 +287,11 @@ def engrave(data, mode="movable", minor_do=False, solfa=True, paper=None, compac
             for clef in part.findall("measure/attributes/clef"):
                 if clef.findtext("sign") == "G" and clef.findtext("line") == "2" and clef.find("clef-octave-change") is None:
                     child(clef, "clef-octave-change", "-1")
-    if paper:
+    if not show_lyrics:
+        for note in root.findall(".//note[lyric]"):
+            for lyric in note.findall("lyric"):
+                note.remove(lyric)
+    elif paper:
         # OCR offsets describe the original engraving, not a reflowed system.
         for lyric in root.findall(".//note/lyric"):
             for attr in ("default-x", "default-y", "relative-x", "relative-y"):

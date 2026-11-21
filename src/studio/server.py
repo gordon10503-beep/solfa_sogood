@@ -235,8 +235,8 @@ def pdf_playback_preview(data, mode, minor):
 
 
 @functools.lru_cache(maxsize=6)
-def rendered(data, mode, minor_do, solfa, paper=None, compact=False, tenor_part="auto"):
-    return engrave(data, mode, minor_do, solfa, paper, compact, tenor_part)
+def rendered(data, mode, minor_do, solfa, paper=None, compact=False, tenor_part="auto", show_lyrics=True):
+    return engrave(data, mode, minor_do, solfa, paper, compact, tenor_part, show_lyrics)
 
 
 def seed(library):
@@ -383,7 +383,12 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     if q.get("version") and q["version"][0] != hashlib.sha256(row["xml"]).hexdigest():
                         raise ValueError("Notation changed in another window. Reopen this score to see the latest version.")
-                    result = rendered(row["xml"], mode, minor, q.get("solfa", ["true"])[0] == "true", paper, q.get("compact")==["true"], q.get("tenor", ["auto"])[0])
+                    show_lyrics = q.get("lyrics", ["auto"])[0]
+                    if show_lyrics == "auto":
+                        show_lyrics = row["meta"].get("origin") != "Scan"
+                    else:
+                        show_lyrics = show_lyrics == "true"
+                    result = rendered(row["xml"], mode, minor, q.get("solfa", ["true"])[0] == "true", paper, q.get("compact")==["true"], q.get("tenor", ["auto"])[0], show_lyrics)
                     if q.get("reader") == ["pages"]:
                         return self.respond({key: result.get(key) for key in ("pages", "issues", "engravingLog")})
                 return self.respond({**result, "sourceSizes": sizes, "sourcePages": chosen, "id": row["id"], "meta": row["meta"], "revision": row["revision"], "hasSource": row["source"] is not None, "sourceType": row["source_type"], "title": row["meta"].get("title", result["title"])})

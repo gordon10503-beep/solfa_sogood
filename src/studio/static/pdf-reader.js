@@ -5,7 +5,6 @@ window.StudioPDF = (() => {
   function controls(){
     $('pdf-undo').disabled=!!stroke||!marks.some(m=>m.page===page);
     $('pdf-redo').disabled=!!stroke||!redoByPage.get(page)?.length;
-    $('pdf-prev').disabled=page===(comparison&&selectedPages.length?selectedPages[0]:1);$('pdf-next').disabled=!pdf||page===(comparison&&selectedPages.length?selectedPages.at(-1):pdf.numPages);
     $('pdf-page-label').textContent=pdf?`${page} / ${pdf.numPages}`:'';
   }
   function draw(slot){
@@ -53,7 +52,7 @@ window.StudioPDF = (() => {
       const visible=slots.filter(s=>s.near).map(s=>({slot:s,r:s.sheet.getBoundingClientRect()})).filter(x=>x.r.bottom>0&&x.r.right>0).sort((a,b)=>Math.abs(a.r.top-$('score-scroll').getBoundingClientRect().top)-Math.abs(b.r.top-$('score-scroll').getBoundingClientRect().top));
       if(visible.length&&!stroke){page=visible[0].slot.number;controls();}
     },{root:$('score-scroll'),rootMargin:'250px',threshold:0});
-    slots.forEach(s=>observer.observe(s.sheet));controls();
+    slots.forEach(s=>observer.observe(s.sheet));controls();scheduleTurns();
   }
   async function open(id,annotations,onSave,sizes=[],pages=[]){
     const token=++request;const pagesChanged=String(selectedPages)!==String(pages);selectedPages=pages||[];
@@ -78,12 +77,68 @@ window.StudioPDF = (() => {
   }
   function setTool(next){tool=next;slots.forEach(s=>{s.ink.style.touchAction=tool==='pan'?'auto':'none';s.ink.style.pointerEvents=tool==='pan'?'none':'auto';});document.querySelectorAll('[data-ink]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.ink===tool)));}
   document.querySelectorAll('[data-ink]').forEach(b=>b.onclick=()=>setTool(b.dataset.ink));
-  function navigate(delta){const visible=comparison&&selectedPages.length?selectedPages:slots.map(s=>s.number);const index=Math.max(0,visible.indexOf(page));page=visible[Math.max(0,Math.min(visible.length-1,index+delta*(comparison?1:+$('pdf-layout').value||1)))];const slot=slots[page-1];if(!slot)return;const host=$('pdf-pages');if(host.classList.contains('horizontal'))host.scrollTo({left:slot.sheet.parentElement.offsetLeft-host.offsetLeft,behavior:'smooth'});else{const pane=$('score-scroll');pane.scrollTo({top:pane.scrollTop+slot.sheet.getBoundingClientRect().top-pane.getBoundingClientRect().top-90,behavior:'smooth'});}controls();}
+  const host=$('pdf-pages'), turns=$('pdf-turns');
+  function currentSpread(){
+    const groups=host.children;
+    const horizontal=host.classList.contains('horizontal');
+    const bounds=pane.getBoundingClientRect();
+    const probe=horizontal?host.getBoundingClientRect().left+host.clientWidth/2:bounds.top+bounds.height/2;
+    for(let i=0;i<groups.length;i++){
+      const rect=groups[i].getBoundingClientRect();
+      if((horizontal?rect.right:rect.bottom)>probe)return i;
+    }
+    return groups.length-1;
+  }
+  function positionTurns(){
+    if(!$('pdf-reader').getClientRects().length)return;
+    const rect=$('pdf-reader').getBoundingClientRect(), viewport=pane.getBoundingClientRect();
+    turns.style.left=Math.max(0,rect.left)+'px';
+    turns.style.right=Math.max(0,document.documentElement.clientWidth-rect.right)+'px';
+    turns.style.top=(Math.max(0,viewport.top)+Math.min(innerHeight,viewport.bottom))/2+'px';
+    const i=currentSpread();
+    $('pdf-prev').disabled=i<=0;
+    $('pdf-next').disabled=i>=host.children.length-1;
+  }
+  let frame;
+  function scheduleTurns(){
+    if(!frame)frame=requestAnimationFrame(()=>{frame=0;positionTurns();});
+  }
+  function navigate(delta){
+    const target=host.children[currentSpread()+delta];
+    if(!target)return;
+    page=Number(target.firstElementChild.dataset.page);
+    const behavior=matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth';
+    if(host.classList.contains('horizontal'))host.scrollTo({left:target.offsetLeft,behavior});
+    else{
+      const offset=pane.classList.contains('spread-focus')?$('pdf-controls').offsetHeight:0;
+      pane.scrollTo({top:pane.scrollTop+target.getBoundingClientRect().top-pane.getBoundingClientRect().top-offset,behavior});
+    }
+    controls();
+  }
   $('pdf-prev').onclick=()=>navigate(-1);$('pdf-next').onclick=()=>navigate(1);
+  let drag=null;
+  host.addEventListener('pointerdown',e=>{
+    drag=null;
+    if(tool!=='pan'||!e.isPrimary||e.button!==0)return;
+    drag={id:e.pointerId,x:e.clientX,y:e.clientY};
+    host.setPointerCapture(e.pointerId);
+  });
+  host.addEventListener('pointerup',e=>{
+    if(drag?.id!==e.pointerId)return;
+    const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+    drag=null;
+    if(tool==='pan'&&Math.abs(dx)>=48&&Math.abs(dx)>1.5*Math.abs(dy))navigate(dx<0?1:-1);
+  });
+  host.addEventListener('lostpointercapture',()=>{drag=null;});
+  host.addEventListener('pointercancel',()=>{drag=null;});
   $('pdf-layout').onchange=$('pdf-direction').onchange=()=>{if(pdf)arrange();};
   $('pdf-undo').onclick=()=>{if(stroke)return;const i=marks.findLastIndex(m=>m.page===page);if(i>=0){const history=redoByPage.get(page)||[];history.push({index:i,mark:marks.splice(i,1)[0]});redoByPage.set(page,history);redraw();save?.(structuredClone(marks));}};
   $('pdf-redo').onclick=()=>{if(stroke)return;const entry=redoByPage.get(page)?.pop();if(entry){marks.splice(Math.min(entry.index,marks.length),0,entry.mark);redraw();save?.(structuredClone(marks));}};
   const pane=$('score-scroll');
+  const resize=new ResizeObserver(scheduleTurns);
+  resize.observe(pane);resize.observe(host);resize.observe($('pdf-reader'));
+  host.addEventListener('scroll',scheduleTurns,{passive:true});
+  document.addEventListener('scroll',scheduleTurns,{capture:true,passive:true});
   let previousLayout;
   function focusSpread(enabled){
     const anchor=slots[page-1];

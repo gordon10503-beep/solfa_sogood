@@ -85,15 +85,25 @@ def build_playback(root, info):
                 continue
             onset = q + n["offset"]
             key = (n["part"], n["staff"], n["voice"], n["midi"])
-            previous = ties.get(key)
-            if n["tieStop"] and previous is not None and abs(previous["end"] - onset) < 1e-5:
-                previous["end"] = onset + n["duration"]
-                if not n["tieStart"]: ties.pop(key, None)
-                continue
+            pending = ties.pop(key, None)
             event = {"id": n["id"], "part": n["part"], "measure": mi,
                      "pitch": n["midi"], "start": onset, "end": onset+n["duration"]}
-            quarter_events.append(event)
-            if n["tieStart"]: ties[key] = event
+            end = event["end"]
+            if n["tieStop"] and pending and abs(pending[1] - onset) < 1e-5:
+                event = pending[0]
+                event["end"] = end
+            else:
+                quarter_events.append(event)
+            if n["tieStart"]:
+                bar = parts[n["part"]]["measures"][mi]
+                # Another scanned part may overfill this measure. Match an
+                # explicit continuation across the padded ensemble boundary.
+                match_at = end
+                if (position + 1 < len(order) and order[position+1] == mi+1
+                        and abs(end-q-bar["extent"]) < 1e-5
+                        and abs(bar["extent"]-bar["length"]) < 1e-5):
+                    match_at = q + length
+                ties[key] = (event, match_at)
         q += length
     positions = sorted(tempos)
     elapsed, seconds = 0., []
