@@ -63,9 +63,16 @@ async function openScore(id, preserve=false, initialView="read") {
   if(mixSave) {clearTimeout(mixSave);mixSave=null;if(state.score)await queueMeta({mixer:structuredClone(state.mixer)});}
   await state.saving;
   const generation=++state.openGeneration;
+  if(!preserve){
+    state.issueIndex=0;
+    $("issue-detail").hidden=true;
+    document.body.classList.remove("workspace-expanded","review-inspector-open");
+    $("rehearsal-workspace").setAttribute("aria-expanded","false");
+  }
   pause();state.scrollStart=null;$("scroll-only").textContent="▷ Scroll without sound";
   const oldPosition=preserve?state.position:0, oldScroll=preserve?$("score-scroll").scrollTop:0;
   ensureNotation=null;
+  state.mountIssuePage=null;
   busy(true,"Opening score…");
   if(!preserve && state.library.find(s=>s.id===id)?.sourceType==="application/pdf"){
     StudioPDF.preload(id);
@@ -106,7 +113,6 @@ async function openScore(id, preserve=false, initialView="read") {
   $("score-subtitle").textContent=[result.composer,`${result.parts.length} parts`,`${result.parts[0]?.measures.length||0} bars`,`${pageCount} ${pageCount===1?"page":"pages"}`].filter(Boolean).join("  ·  ");
   $("breadcrumb").textContent="Score reader";$("library-view").hidden=true;$("score-view").hidden=false;
   $("scan-banner").hidden=result.meta.reviewed || (result.meta.origin!=="Scan" && !result.issues.length);
-  $("scan-banner").textContent=result.issues.length?`${result.issues.length} notation checks need attention. Open “Check score” before relying on playback.`:"Recognition is a first draft. Compare the scan, correct notes, then mark it reviewed.";
   function mountNotation(){
     const pageContainers=result.pages.map((_,index)=>{
       const el=document.createElement('div');el.className='score-page';
@@ -117,9 +123,17 @@ async function openScore(id, preserve=false, initialView="read") {
       return el;
     });
     $("pages").replaceChildren(...pageContainers);
+    let keyboardNote=null;
+    function setKeyboardNote(note){
+      keyboardNote?.setAttribute("tabindex","-1");
+      keyboardNote=note;
+      note.setAttribute("tabindex","0");
+    }
     function mountPage(i){
       if(generation!==state.openGeneration)return;
-      const container=pageContainers[i];const svg=safeSvg(result.pages[i]);
+      const container=pageContainers[i];
+      if(container.firstElementChild)return;
+      const svg=safeSvg(result.pages[i]);
       if(container.classList.contains("source-paper")){
         const inner=svg.querySelector("svg[viewBox]");
         if(inner){
@@ -153,7 +167,9 @@ async function openScore(id, preserve=false, initialView="read") {
         }
       }
       notes.forEach(([note,bounds])=>{
-        note.setAttribute("tabindex","0");note.setAttribute("role","button");
+        note.setAttribute("tabindex","-1");note.setAttribute("role","button");
+        if(!keyboardNote)setKeyboardNote(note);
+        note.addEventListener("focus",()=>setKeyboardNote(note));
         // SVG groups otherwise only respond on the thin painted note/stem paths.
         // Give the whole note a forgiving, transparent hit area for mouse/touch.
         const hit=document.createElementNS("http://www.w3.org/2000/svg","rect");
@@ -168,9 +184,29 @@ async function openScore(id, preserve=false, initialView="read") {
           title.textContent=pitch;
           note.prepend(title);bindPitchDrag(note,n);
         }
-        note.addEventListener("click",()=>selectNote(note.id));note.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();selectNote(note.id);}});
+        note.addEventListener("click",()=>{setKeyboardNote(note);selectNote(note.id);});
       });
     }
+    state.mountIssuePage=number=>{if(pageContainers[number])mountPage(number);};
+    $("pages").onkeydown=e=>{
+      const note=e.target.closest('[role="button"]');
+      if(!note || e.altKey || e.ctrlKey || e.metaKey)return;
+      if(e.key==="Enter" || e.key===" "){
+        e.preventDefault();if(!e.repeat)selectNote(note.id);return;
+      }
+      if(!["ArrowLeft","ArrowRight"].includes(e.key))return;
+      e.preventDefault();
+      const step=e.key==="ArrowLeft"?-1:1;
+      let page=pageContainers.indexOf(note.closest(".score-page"));
+      const items=[...pageContainers[page].querySelectorAll('[role="button"]')];
+      let next=items[items.indexOf(note)+step];
+      while(!next && pageContainers[page+=step]){
+        mountPage(page);
+        const candidates=pageContainers[page].querySelectorAll('[role="button"]');
+        next=candidates[step>0?0:candidates.length-1];
+      }
+      next?.focus();
+    };
     if(result.pages.length)mountPage(0);
     let nextPage=1;
     function mountLater(){if(generation!==state.openGeneration||nextPage>=result.pages.length)return;mountPage(nextPage++);(window.requestIdleCallback||requestAnimationFrame)(mountLater);}
@@ -203,21 +239,29 @@ async function openScore(id, preserve=false, initialView="read") {
   $("score-scroll").scrollTop=oldScroll;
   await opening;
 }
+const noteEditorHome=$("note-details").nextElementSibling;
 function setView(view, refresh=true) {
   const format = state.score?.sourceType==="application/pdf" ?
     ({original:"pdf",review:"compare"}[view] || "notation") : "notation";
   const changed=$("reader-format").value!==format;
   $("reader-format").value=format;
-  if(changed && refresh)run(readerFormat)();
   $("edit-strip").hidden=!["compose","review"].includes(view);
   if(view!=="compose")setPianoAction(null);
   state.view=view;
   document.body.dataset.page=view;
+  if(view==="review")$("review-note").after($("note-details"));
+  else if($("note-details").parentNode!==noteEditorHome.parentNode)noteEditorHome.before($("note-details"));
+  $("issue-nav").hidden=view!=="review";
+  if(view!=="review"){
+    document.body.classList.remove("review-inspector-open");
+    $("review-inspector-toggle").setAttribute("aria-expanded","false");
+  }
   document.querySelector(".inspector").hidden=["read","original"].includes(view);
   $("breadcrumb").textContent={read:"Read notation",original:"Original PDF",practice:"Practice",compose:"Compose",review:"Review"}[view];
   $("minor-do").closest("label").hidden=$("solfa-mode").value!=="movable";
   document.querySelectorAll("[data-view]").forEach(b=>{b.classList.toggle("active",b.dataset.view===view);b.setAttribute("aria-selected",String(b.dataset.view===view));});
   ["read","compose","review"].forEach(v=>$(v+"-panel").hidden=(v==="read" ? view!=="practice" : v!==view));
+  if(changed && refresh)run(readerFormat)();
 }
 function bindPitchDrag(note, n) {
   let drag;
@@ -395,6 +439,8 @@ function renderIssues() {
   renderPageTrials();
   renderRhythmReport(state.currentMeasure);
   const issues=state.score.issues;$("review-note").textContent=state.score.meta.reviewNote||"";$("issue-count").textContent=issues.length;$("review-pill").textContent=state.score.meta.reviewed?"REVIEWED":"TO REVIEW";
+  $("scan-banner").textContent=issues.length?`Check ${issues.length} notation ${issues.length===1?"issue":"issues"} ›`:"Review this scan ›";
+  updateIssueNav();
   const bars = new Map(), notices = [];
   issues.forEach((issue, index) => {
     if (issue.measure === undefined) {
@@ -446,17 +492,91 @@ function renderIssues() {
     $("issues").prepend(panel);
   }
   if(state.score.engravingLog) { const details=document.createElement("details");details.innerHTML='<summary class="hint">Engraver notices</summary>';const p=document.createElement("p");p.className="hint";p.textContent=state.score.engravingLog;details.appendChild(p);$("issues").appendChild(details); }
-  $("issues").querySelectorAll("[data-issue]").forEach(button=>button.onclick=()=>{
-    const issue=issues[+button.dataset.issue];
-    jumpBar(issue.measure,issue.part);
-    renderRhythmReport(issue.measure);
-    $("compose-part").value=issue.part;fillBars(issue.measure);
-    $("meter-bar").value=issue.measure+1;
-    if(issue.code==="missing-meter"){
-      $("meter-bar").closest("details").open=true;$("meter-beats").focus();
-    }
-  });
+  $("issues").querySelectorAll("[data-issue]").forEach(button=>button.onclick=run(()=>openIssue(+button.dataset.issue)));
 }
+function updateIssueNav(){
+  const issues=state.score.issues;
+  state.issueIndex=Math.min(state.issueIndex||0,Math.max(0,issues.length-1));
+  const i=state.issueIndex,issue=issues[i];
+  const location=issue?.measure!=null?` · Bar ${issue.measure+1}`:"";
+  $("issue-open").textContent=issue?`Issue ${i+1} of ${issues.length}${location}`:"Review score";
+  $("issue-prev").disabled=i===0;
+  $("issue-next").disabled=i+1>=issues.length;
+  $("issue-open").setAttribute("aria-expanded",String(!$("issue-detail").hidden));
+  $("issue-message").textContent=issue?.message||"Compare the recognized notation with your original.";
+  $("issue-correct").textContent=issue?.code==="missing-meter"?"Correct meter":issue?.measure!=null?"Edit bar":"Review details";
+}
+async function openIssue(index){
+  const score=state.score;
+  state.issueIndex=index;
+  $("issue-detail").hidden=false;
+  updateIssueNav();
+  await ensureNotation?.();
+  if(state.score!==score || state.view!=="review" || state.issueIndex!==index)return;
+  const issue=score.issues[index];
+  if(issue?.measure==null)return;
+  const bar=score.parts[issue.part]?.measures[issue.measure];
+  // Engraving may reflow. Locate the actual SVG measure even on an unmounted page.
+  const measureId="ss-measure-"+issue.measure;
+  if(!$(measureId)){
+    const at=score.pages.findIndex(svg=>svg.includes('id="'+measureId+'"'));
+    if(at>=0)state.mountIssuePage?.(at);
+  }
+  jumpBar(issue.measure,issue.part);
+  renderRhythmReport(issue.measure);
+  $("compose-part").value=issue.part;fillBars(issue.measure);
+  $("meter-bar").value=issue.measure+1;
+  const el=$(measureId);
+  if(el)scrollToElement(el);
+  const pageNumbers=score.sourcePages?.length?score.sourcePages:score.sourceSizes.map((_,i)=>i+1);
+  if(bar?.exportPage && score.parts.every(p=>p.measures.at(-1)?.exportPage===pageNumbers.length)){
+    const paper=el?.closest(".score-page");
+    const fraction=paper?(el.getBoundingClientRect().top-paper.getBoundingClientRect().top)/paper.offsetHeight:0;
+    const sheet=$("pdf-pages").querySelector('[data-page="'+pageNumbers[bar.exportPage-1]+'"]');
+    if(sheet)scrollReviewPane($("pdf-reader"),sheet,Math.max(0,Math.min(1,fraction))*sheet.offsetHeight);
+  }else if(score.sourceType==="application/pdf"){
+    $("issue-message").textContent+=" Original PDF page unconfirmed.";
+  }
+}
+on("issue-prev","click",()=>openIssue(state.issueIndex-1));
+on("issue-next","click",()=>openIssue(state.issueIndex+1));
+on("issue-open","click",()=>{
+  if($("issue-detail").hidden)return openIssue(state.issueIndex);
+  $("issue-detail").hidden=true;updateIssueNav();
+});
+on("issue-correct","click",()=>{
+  const issue=state.score.issues[state.issueIndex];
+  document.body.classList.add("review-inspector-open");
+  $("review-inspector-toggle").setAttribute("aria-expanded","true");
+  let field=$("review-panel");
+  if(issue?.code==="missing-meter")field=$("meter-beats");
+  else if(issue?.measure!=null){
+    const notes=Object.values(state.score.notes).filter(n=>n.measure===issue.measure && n.part===issue.part);
+    const target=notes.find(n=>n.id===state.selected)||notes.find(n=>n.pitched)||notes[0];
+    if(target)selectNote(target.id);
+    field=target?.pitched?$("note-step"):$("rhythm-position");
+  }
+  const details=field.closest("details");if(details)details.open=true;
+  field.focus();field.scrollIntoView({block:"nearest"});
+});
+on("review-inspector-toggle","click",()=>{
+  const open=document.body.classList.toggle("review-inspector-open");
+  $("review-inspector-toggle").setAttribute("aria-expanded",String(open));
+});
+document.addEventListener("keydown",event=>{
+  if(state.view==="review" && event.altKey && !event.ctrlKey && !event.metaKey && event.key.toLowerCase()==="i" && !document.querySelector("dialog[open]")){
+    event.preventDefault();$("issue-open").focus();
+  }
+});
+on("scan-banner","click",async()=>{
+  setView("review",false);
+  await readerFormat();
+  if(state.view==="review"){await openIssue(0);$("issue-open").focus({preventScroll:true});}
+});
+on("rehearsal-workspace","click",()=>{
+  const expanded=document.body.classList.toggle("workspace-expanded");
+  $("rehearsal-workspace").setAttribute("aria-expanded",String(expanded));
+});
 let textCallback;
 function textDialog(title,label,value,callback) { $("text-title").textContent=title;$("text-label").textContent=label;$("text-value").value=value;textCallback=callback;$("text-dialog").showModal();$("text-value").focus();$("text-value").select(); }
 function bookmark() {
@@ -662,7 +782,24 @@ notationPages.addEventListener("scroll",updateNotationTurns,{passive:true});
 for(const [id,delta] of [["notation-prev",-1],["notation-next",1]]){
   on(id,"click",()=>notationPages.children[notationIndex()+delta]?.scrollIntoView({inline:"start",block:"nearest",behavior:"smooth"}));
 }
+const comparisonOffsets=new WeakMap();
+function scrollReviewPane(pane,el,offset=0){
+  pane.scrollTop+=el.getBoundingClientRect().top-pane.getBoundingClientRect().top+offset-28;
+  comparisonOffsets.set(pane,pane.scrollTop);
+}
+for(const [pane,other] of [[$("digital-reader"),$("pdf-reader")],[$("pdf-reader"),$("digital-reader")]]){
+  pane.addEventListener("scroll",()=>{
+    const previous=comparisonOffsets.get(pane)||0;
+    comparisonOffsets.set(pane,pane.scrollTop);
+    if(state.view!=="review" || $("reader-format").value!=="compare" || previous===pane.scrollTop)return;
+    other.scrollTop+=pane.scrollTop-previous;
+    comparisonOffsets.set(other,other.scrollTop);
+  },{passive:true});
+}
 function scrollToElement(el) {
+  if(state.view==="review" && $("reader-format").value==="compare"){
+    scrollReviewPane($("digital-reader"),el);return;
+  }
   if(state.view==="read" && document.body.classList.contains("notation-horizontal"))el.closest(".score-page")?.scrollIntoView({inline:"start",block:"nearest"});
   const pane=$("score-scroll"), rect=el.getBoundingClientRect(), parent=pane.getBoundingClientRect();
   pane.scrollTo({top:pane.scrollTop+rect.top-parent.top-90,behavior:"smooth"});
@@ -886,7 +1023,8 @@ $("metro-settings").addEventListener("keydown",event=>{
 on("metronome","click",async()=>{await audioReady();state.metronome=!state.metronome;state.nextQuarter=undefined;state.position=position();state.metroNext=state.audio.currentTime+.03;$("metronome").setAttribute("aria-pressed",String(state.metronome));ensureScheduler();});
 on("keyboard-btn","click",()=>toggleKeyboard());on("close-keyboard","click",()=>toggleKeyboard(false));
 document.addEventListener("keydown",run(async e=>{
-  if(e.target.closest("input,textarea,select,dialog")||e.ctrlKey||e.metaKey||e.altKey)return;
+  if(e.defaultPrevented||e.target.closest("input,textarea,select,dialog,[contenteditable=true]")||e.ctrlKey||e.metaKey||e.altKey)return;
+  if(e.code==="Space" && e.target.closest("button,summary,a,[role=button],[role=tab],[role=separator]"))return;
   if(e.code==="Space"){e.preventDefault();await play();return;}
   if(e.repeat||$("keyboard-panel").hidden)return;
   const index="awsedftgyhujk".indexOf(e.key.toLowerCase());if(index>=0){e.preventDefault();await keyboardNote(60+index);}
@@ -926,6 +1064,9 @@ async function readerFormat(){
   $("reader-surfaces").classList.toggle("comparison",format==="compare");
   StudioPDF.setComparison(format==="compare");
   const controls=$("pdf-controls");
+  const pen=controls.querySelector('[data-ink="pen"]');
+  if(format==="compare")$("pdf-undo").before(pen);
+  else $("spread-tools").before(pen);
   if(!$("score-scroll").classList.contains("spread-focus"))$("edit-strip").before(controls);
   controls.hidden=!original;
   $("digital-reader").hidden=format==="pdf";

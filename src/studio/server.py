@@ -184,7 +184,7 @@ class Library:
         return result, sizes or []
 
     @functools.lru_cache(maxsize=8)
-    def first_pdf_sheet(self, sid):
+    def first_pdf_sheet(self, sid, number=1):
         """Cache a bounded screen raster of the immutable original, per library."""
         import pymupdf
         with self.connect() as db:
@@ -192,7 +192,9 @@ class Library:
         if row is None or not row["source"]:
             raise ValueError("No original PDF is attached.")
         with pymupdf.open(stream=row["source"], filetype="pdf") as doc:
-            page = doc[0]
+            if number not in (1, 2) or number > len(doc):
+                raise ValueError("Opening spread page is unavailable.")
+            page = doc[number - 1]
             width, height = page.rect.width, page.rect.height
             if width <= 0 or height <= 0:
                 raise ValueError("Invalid PDF page dimensions.")
@@ -448,7 +450,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(row["xml"], "application/vnd.recordare.musicxml+xml")
             if path.path.startswith("/api/pdf-cover/"):
                 sid = path.path.split("/")[-1]
-                data = self.workspace.library.first_pdf_sheet(sid)
+                number = int(parse_qs(path.query).get("page", ["1"])[0])
+                data = self.workspace.library.first_pdf_sheet(sid, number)
                 return self.respond(data, "image/png", etag='"' + hashlib.sha256(data).hexdigest() + '"')
             if path.path.startswith("/api/source/"):
                 with self.workspace.library.connect() as db:

@@ -205,3 +205,70 @@ body[data-page=read].notation-horizontal #notation-turns{display:flex}
 body[data-page=read].notation-horizontal #pages{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;align-items:flex-start}
 body[data-page=read].notation-horizontal #pages>.score-page{flex:0 0 100%;margin:0;scroll-snap-align:start}
 }
+
+#rehearsal-workspace, #review-inspector-toggle { display: none; }
+.pdf-loading {
+  position: absolute; inset: 42% 0 auto; text-align: center;
+  color: var(--muted); font: 600 14px system-ui, sans-serif;
+}
+#scan-banner { display: block; text-align: left; font-weight: 650; padding: 7px 12px; margin: 0 0 6px; }
+#scan-banner[hidden], body[data-page=review] #scan-banner { display: none; }
+#issue-nav { background: white; border-bottom: 1px solid var(--line); padding: 3px 10px; flex: none; }
+.issue-row, #issue-detail:not([hidden]) { display: flex; gap: 6px; align-items: center; }
+#issue-open { color: var(--blue); }
+#issue-detail { padding: 6px 2px; }
+#issue-detail p { flex: 1; max-height: 14vh; overflow: auto; }
+#issue-detail .button { flex: none; }
+#pages [role=button]:focus-visible { outline: 2px solid var(--blue); }
+
+@media screen {
+  body[data-page=original] :is(#score-view, .spread-focus) #pdf-controls {
+    display: flex; flex-direction: column; align-items: stretch; gap: 0;
+    height: auto; overflow: visible; padding: 2px max(6px, env(safe-area-inset-right));
+  }
+  body[data-page=original] .spread-focus #pdf-controls { padding-top: max(2px,env(safe-area-inset-top)); }
+  body[data-page=original] #spread-actions {
+    display: flex; align-items: center; gap: 5px; min-width: 0;
+  }
+  body[data-page=original] #spread-actions :is(button, select) {
+    display: inline-flex; justify-content: center; align-items: center; height: 44px; min-width: 44px;
+  }
+  #spread-actions #listen-part {
+    flex: 0 1 170px; width: 0; padding: 0 5px; border: 1px solid var(--line);
+    border-radius: 8px; background: white; color: var(--ink);
+  }
+  #spread-actions #spread-play { border-color: var(--blue); color: white; background: var(--blue); }
+  #spread-actions [data-ink][aria-pressed=true] { background: var(--yellow); }
+  body[data-page=original] #pdf-controls:not(.spread-tools-open) .pdf-tools { display: none; }
+  body[data-page=original] #pdf-controls.spread-tools-open .pdf-tools {
+    display: flex; flex: auto; flex-wrap: nowrap; overflow: auto; gap: 6px; padding: 4px 0;
+  }
+  body[data-page=original] #pdf-controls .pdf-tools > * { flex: none; }
+  body[data-page=original] .spread-focus { --reader-dock-height: 49px; }
+  body[data-page=original] .spread-focus:has(.spread-tools-open) { --reader-dock-height: 101px; }
+  .spread-focus #pdf-pages .pdf-spread { min-height: calc(100dvh - var(--reader-dock-height) - env(safe-area-inset-top)); }
+  .spread-focus #pdf-pages .pdf-sheet { max-width: min(100%, calc((100dvh - var(--reader-dock-height) - env(safe-area-inset-top)) * var(--sheet-ratio,.707))); }
+
+  body[data-page=review] #pdf-controls :is(#pdf-layout,#pdf-direction) { display: none; }
+  body[data-page=review] #score-scroll:has(.comparison) { overflow: hidden; display: flex; flex-direction: column; padding-block: 0; }
+  #reader-surfaces.comparison { flex: 1; min-height: 0; height: 100%; align-items: stretch; }
+  .comparison > :is(#pdf-reader, #digital-reader) { overflow: auto; min-height: 0; scrollbar-width: thin; }
+  #issue-nav[hidden], #issue-detail[hidden] { display: none; }
+}
+@media screen and (max-width:700px) {
+  body[data-page=original] #rehearsal-workspace, #review-inspector-toggle { display: inline-flex; align-items: center; min-height: 44px; }
+  body[data-page=original] .score-heading { flex-wrap: wrap; padding-block: 0; }
+  body[data-page=original] .heading-actions { flex-basis: 100%; padding-bottom: 5px; }
+  body[data-page=original]:not(.workspace-expanded) :is(.topbar,.workbar,.heading-actions,#title-divider,#score-subtitle,#score-eyebrow,.transport) { display: none; }
+  body[data-page=original]:not(.workspace-expanded) #score-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  body[data-page=original] #score-scroll { padding: 5px; }
+  body[data-page=original] .spread-focus#score-scroll { padding: 0; }
+  body[data-page=original] #scan-banner { font-size: 12px; min-height: 30px; }
+  body[data-page=review] .workspace { display: flex; flex-direction: column; overflow: hidden; }
+  body[data-page=review] .score-scroll { flex: 1; min-height: 0; overflow: auto; }
+  body[data-page=review] .inspector { display: none; }
+  body[data-page=review].review-inspector-open .inspector { display: block; max-height: 42dvh; min-height: 0; overflow: auto; }
+  #issue-nav .issue-row button { min-height: 40px; }
+  #issue-open { flex: 1; }
+}
+@media print { #issue-nav, #rehearsal-workspace { display: none; } }

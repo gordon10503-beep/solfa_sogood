@@ -8,6 +8,8 @@ from pathlib import Path
 import tempfile
 from time import monotonic
 from types import SimpleNamespace
+from xml.etree import ElementTree as ET
+from zipfile import ZipFile
 
 from src.studio.document import inspect, read_xml
 from src.studio.playback import measure_order
@@ -46,6 +48,35 @@ def vocal_excerpt(case, data):
     observed = Counter({k: n for k, n in events.items() if k[0] == 0 and k[1]+1 in bars})
     return {"bars": list(bars), "expected": expected.total(), "matched": (expected & observed).total(),
             "missing": (expected-observed).total(), "extra": (observed-expected).total()}
+
+
+def lyric_tuplet_checks(pdf, book):
+    """Two visually checked negative examples in the pinned advanced edition."""
+    import pymupdf
+    results = []
+    with pymupdf.open(stream=pdf, filetype="pdf") as doc, ZipFile(book) as archive:
+        for number, character, anchor in [(5, "何", (174, 108)), (8, "過", (521, 114))]:
+            page = doc[number-1]
+            word = next(pymupdf.Rect(w[:4]) for w in page.get_text("words")
+                        if w[4] == character and pymupdf.Point(anchor) in pymupdf.Rect(w[:4]))
+            name = f"sheet#{number}/sheet#{number}.xml"
+            matches = None
+            if name in archive.namelist():
+                sheet = ET.fromstring(archive.read(name))
+                picture = sheet.find("picture")
+                sx = page.rect.width / int(picture.get("width"))
+                sy = page.rect.height / int(picture.get("height"))
+                matches = []
+                for tuplet in sheet.iter("tuplet"):
+                    bounds = tuplet.find("bounds")
+                    if bounds is None:
+                        continue
+                    x, y, w, h = (int(bounds.get(k)) for k in ("x", "y", "w", "h"))
+                    if pymupdf.Point((x+w/2)*sx, (y+h/2)*sy) in word:
+                        matches.append(tuplet.get("shape"))
+            results.append({"page": number, "lyric": character, "expectedTuplets": [],
+                            "observedTuplets": matches})
+    return results
 
 
 def opening_trial(pdf, case, engine, folder, profile):
@@ -112,6 +143,10 @@ def main():
         report["recognizedTupletGroups"] = dict(Counter(n["tupletStart"] for n in info["notes"].values() if "tupletStart" in n))
         report["openingQuarterBpm"] = [t["bpm"] for t in info["parts"][0]["measures"][0]["tempos"] if t["offset"] == 0]
         if case == "advanced":
+            scan_dir = folder / "scans" / case
+            final_pass = scan_dir / "standard" if (scan_dir / "standard").is_dir() else scan_dir
+            book = next(final_pass.rglob("*.omr"), None)
+            report["checkedTupletsOverLyrics"] = lyric_tuplet_checks(data, book) if book else None
             report["partsWith55PrintedBars"] = sum(p["bars"] == 55 for p in report["parts"])
             report["openingTempoMatchesPrint"] = report["openingQuarterBpm"] == [108]
         if case == "grow":

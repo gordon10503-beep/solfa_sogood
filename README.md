@@ -94,6 +94,10 @@ Open **Check score** to compare the original PDF with the recognized music. Warn
 
 ## Read and edit on a tablet
 
+Open a PDF, choose your part in the reader toolbar, and press Play. Pen stays beside playback in both normal and full-page view. Tap Pen again to navigate, or open **Tools** for Highlight, undo, and page layout. On phones, **Workspace** reveals the other tabs and playback settings.
+
+Tap the scan warning to compare an issue with the original. The issue strip shows the bar and lets you step through warnings or open the relevant editor. Studio jumps to the corresponding PDF page when page mapping is available. Placement within that page is approximate. In the notation, Tab enters the score, Left and Right move between notes, and Enter or Space selects one. Alt+I returns to the issue strip.
+
 **Read notation** opens the editable engraving. **Original PDF** opens the source pages. **Check score** opens both in comparison using the original page dimensions and available encoded page breaks. Missing recognition or missing page breaks can still put different bars opposite one another.
 
 In **Check score** and **Compose**, drag a symbol from the top palette, or select it and tap the staff. Place a note within a rest to split that rest at the selected subdivision. Drop articulations directly onto notes. Drag a pitched note vertically for an immediate staff preview. Undo and redo support Ctrl/Cmd+Z, Ctrl+Y and Cmd/Ctrl+Shift+Z. **Reading options** remembers the title and toolbar spacing on this device. On small screens **Library** opens the navigation drawer.

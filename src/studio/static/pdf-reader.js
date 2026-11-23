@@ -4,6 +4,16 @@ window.StudioPDF = (() => {
   let pdf=null,page=1,scoreId=null,marks=[],save=null,tool='pan',stroke=null,observer=null,slots=[],generation=0,comparison=false,savedDirection='vertical',selectedPages=[],request=0;
   const recentCanvases=new Set();
   let pendingSource;
+  function previewCanvas(id,number){
+    const image=new Image();
+    image.src='/api/pdf-cover/'+id+(number===1?'':'?page='+number);
+    return image.decode().then(()=>{
+      const canvas=document.createElement('canvas');
+      canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
+      canvas.getContext('2d').drawImage(image,0,0);
+      return canvas;
+    }).catch(()=>null);
+  }
   function preload(id){
     if(scoreId===id || pendingSource?.id===id)return;
     if(pendingSource?.task)void pendingSource.task.destroy().catch(()=>{});
@@ -17,14 +27,7 @@ window.StudioPDF = (() => {
     });
     // Start the first sheet independently of PDF.js font and worker setup.
     // Subsequent sheets and the fallback use the original document in PDF.js.
-    const cover=new Image();
-    cover.src='/api/pdf-cover/'+id;
-    pending.firstCanvas=cover.decode().then(()=>{
-      const canvas=document.createElement('canvas');
-      canvas.width=cover.naturalWidth;canvas.height=cover.naturalHeight;
-      canvas.getContext('2d').drawImage(cover,0,0);
-      return canvas;
-    }).catch(()=>null);
+    pending.firstCanvas=previewCanvas(id,1);
     pending.ready.catch(()=>{});
   }
   function controls(){
@@ -60,14 +63,30 @@ window.StudioPDF = (() => {
   async function render(slot){
     if(slot.canvas||slot.rendering)return;slot.rendering=true;const ticket=generation,doc=pdf;
     try{
+      if(slot.number===2 && slot.sheet.parentElement?.children.length===2)
+        slot.prepared=previewCanvas(scoreId,2);
       const canvas=await slot.prepared || await pageCanvas(doc,slot.number);
       if(ticket!==generation||!slot.near)return;
       slot.sheet.style.setProperty('--sheet-ratio',canvas.width/canvas.height);slot.sheet.style.aspectRatio=`${canvas.width}/${canvas.height}`;slot.surface.replaceChildren(canvas);slot.canvas=canvas;
-    }catch(e){if(ticket===generation)slot.surface.textContent='Could not render this page: '+e.message;}
-    finally{slot.prepared=null;slot.rendering=false;}
+      slot.sheet.setAttribute('aria-busy','false');
+    }catch(e){if(ticket===generation){slot.failed=true;slot.sheet.setAttribute('aria-busy','false');slot.surface.textContent='Could not render this page: '+e.message;}}
+    finally{slot.prepared=null;slot.rendering=false;if(ticket===generation)pumpPages();}
+  }
+  const nearby=new Set();
+  function pumpPages(){
+    const bounds=$('score-scroll').getBoundingClientRect();
+    const distance=slot=>{
+      const r=slot.sheet.getBoundingClientRect();
+      return Math.max(0,bounds.top-r.bottom,r.top-bounds.bottom,bounds.left-r.right,r.left-bounds.right);
+    };
+    const ordered=[...nearby].filter(s=>!s.canvas&&!s.rendering&&!s.failed).map(s=>[s,distance(s)]).sort((a,b)=>a[1]-b[1]);
+    const capacity=2-slots.filter(s=>s.rendering).length;
+    for(const [slot] of ordered.slice(0,Math.max(0,capacity)))void render(slot);
   }
   function arrange(){
     observer?.disconnect();
+    nearby.clear();
+    slots.forEach(s=>s.near=false);
     const host=$('pdf-pages'),width=comparison?1:(+$('pdf-layout').value||1),horizontal=!comparison&&$('pdf-direction').value==='horizontal';
     host.classList.toggle('horizontal',horizontal);host.style.setProperty('--pages-per-spread',width);
     const groups=[];
@@ -76,15 +95,17 @@ window.StudioPDF = (() => {
     host.replaceChildren(...groups);$('pdf-direction').disabled=comparison;$('pdf-layout').disabled=comparison;
     observer=new IntersectionObserver(entries=>{
       for(const entry of entries){const slot=slots[+entry.target.dataset.page-1];slot.near=entry.isIntersecting;
-        if(slot.near){recentCanvases.delete(slot);render(slot);}
-        else if(slot.canvas){
+        if(slot.near){recentCanvases.delete(slot);nearby.add(slot);}
+        else nearby.delete(slot);
+        if(!slot.near && slot.canvas){
           recentCanvases.add(slot);
           if(recentCanvases.size>2){
             const oldest=recentCanvases.values().next().value;
-            recentCanvases.delete(oldest);oldest.surface.replaceChildren();oldest.canvas=null;
+            recentCanvases.delete(oldest);oldest.surface.replaceChildren(oldest.loading);oldest.canvas=null;oldest.sheet.setAttribute('aria-busy','true');
           }
         }
       }
+      pumpPages();
       const visible=slots.filter(s=>s.near).map(s=>({slot:s,r:s.sheet.getBoundingClientRect()})).filter(x=>x.r.bottom>0&&x.r.right>0).sort((a,b)=>Math.abs(a.r.top-$('score-scroll').getBoundingClientRect().top)-Math.abs(b.r.top-$('score-scroll').getBoundingClientRect().top));
       if(visible.length&&!stroke){page=visible[0].slot.number;controls();}
     },{root:$('score-scroll'),rootMargin:'250px',threshold:0});
@@ -113,13 +134,16 @@ window.StudioPDF = (() => {
         sheet.className='pdf-sheet';if(sizes?.[i]){sheet.style.aspectRatio=sizes[i].join('/');sheet.style.setProperty('--sheet-ratio',sizes[i][0]/sizes[i][1]);}sheet.dataset.page=i+1;surface.className='pdf-surface';
         ink.setAttribute('viewBox','0 0 1000 1000');ink.setAttribute('preserveAspectRatio','none');ink.classList.add('pdf-ink');ink.setAttribute('aria-label','Annotations on page '+(i+1));
         const label=document.createElement('span');label.className='pdf-sheet-number';label.textContent=i+1;
-        sheet.append(surface,ink,label);const slot={number:i+1,sheet,surface,ink,prepared:i===0?pending.firstCanvas:null};bind(slot);return slot;
+        const loading=document.createElement('span');
+        loading.className='pdf-loading';loading.textContent='Loading page '+(i+1)+'…';
+        surface.append(loading);sheet.setAttribute('aria-busy','true');
+        sheet.append(surface,ink,label);const slot={number:i+1,sheet,surface,ink,loading,prepared:i===0?pending.firstCanvas:null};bind(slot);return slot;
       });arrange();
     }else if(pagesChanged)arrange();
     setTool(tool);redraw();scheduleTurns();
   }
   function setTool(next){tool=next;slots.forEach(s=>{s.ink.style.touchAction=tool==='pan'?'auto':'none';s.ink.style.pointerEvents=tool==='pan'?'none':'auto';});document.querySelectorAll('[data-ink]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.ink===tool)));}
-  document.querySelectorAll('[data-ink]').forEach(b=>b.onclick=()=>setTool(b.dataset.ink));
+  document.querySelectorAll('[data-ink]').forEach(b=>b.onclick=()=>setTool(tool===b.dataset.ink?'pan':b.dataset.ink));
   const host=$('pdf-pages'), turns=$('pdf-turns');
   function currentSpread(){
     const groups=host.children;
@@ -193,7 +217,7 @@ window.StudioPDF = (() => {
     if(enabled)pane.prepend($('pdf-controls'));
     else $('edit-strip').before($('pdf-controls'));
     pane.classList.toggle('spread-focus',enabled);
-    pane.classList.remove('spread-tools-open');
+    $('pdf-controls').classList.remove('spread-tools-open');
     $('spread-tools').setAttribute('aria-expanded','false');
     $('spread-focus').setAttribute('aria-pressed',String(enabled));
     const label=enabled?'Exit full-page view':'Full-page view';
@@ -207,7 +231,7 @@ window.StudioPDF = (() => {
     requestAnimationFrame(()=>anchor?.sheet.parentElement?.scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'}));
   }
   $('spread-focus').onclick=()=>focusSpread(!pane.classList.contains('spread-focus'));
-  $('spread-tools').onclick=()=>$('spread-tools').setAttribute('aria-expanded',String(pane.classList.toggle('spread-tools-open')));
+  $('spread-tools').onclick=()=>$('spread-tools').setAttribute('aria-expanded',String($('pdf-controls').classList.toggle('spread-tools-open')));
   $('spread-play').onclick=()=>$('play').click();
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&pane.classList.contains('spread-focus'))focusSpread(false);});
   function setComparison(value){if(comparison===value)return;if(value){savedDirection=$('pdf-direction').value;$('pdf-direction').value='vertical';}else $('pdf-direction').value=savedDirection;comparison=value;if(pdf)arrange();}

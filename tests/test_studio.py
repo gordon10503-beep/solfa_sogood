@@ -315,6 +315,19 @@ def test_local_http_import_edit_export_and_origin_checks(tmp_path):
             assert cover.headers["Content-Type"] == "image/png"
             assert cover.read().startswith(b"\x89PNG\r\n\x1a\n")
         assert request(f"/api/source/{score}").read() == pdf
+        import pymupdf
+        with pymupdf.open(stream=pdf, filetype="pdf") as original, pymupdf.open() as spread:
+            spread.insert_pdf(original, from_page=0, to_page=0)
+            spread.new_page(width=250, height=400).insert_text((20, 40), "Second page")
+            spread_id = server.library.add(melody(), source=spread.tobytes(), source_type="application/pdf")
+        first = request(f"/api/pdf-cover/{spread_id}").read()
+        second = request(f"/api/pdf-cover/{spread_id}?page=2").read()
+        assert first != second
+        assert pymupdf.Pixmap(second).width == 350
+        for number in (0, 3):
+            with pytest.raises(urllib.error.HTTPError) as error:
+                request(f"/api/pdf-cover/{spread_id}?page={number}")
+            assert error.value.code == 400
         preview = json.load(request(url+"?reader=pdf"))
         assert preview["deferredNotation"] and preview["pages"] == [] and preview["events"]
         pages = json.load(request(url+"?reader=pages&version="+preview["notationVersion"]))

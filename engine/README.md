@@ -42,3 +42,7 @@ The following comparisons use the preceding Studio engine (notehead and wedge pa
 | Saved advanced choir book and SATB fixture | Baseline and candidate matched on all 1,055 and 59 pitched events, respectively, and on all ending marks (nine and zero). These comparisons assess export stability. |
 
 To repeat the whole-score check, run `python -m benchmarks.choir "grow for me.pdf"`. Inspect `endingMarksOverFinalLyricExtender` (expected empty) separately from `matchesFirstAndSecondEndingOnPageTwo` (still false). To run the exporter regression, point `SOLFA_GROW_OMR` at the four-page baseline book and run `python -m pytest -q tests/test_engine_endings.py` with the patched scanner. Counts use bar positions from the beginning, including the pickup.
+
+### False tuplets over Chinese lyrics
+
+The advanced benchmark includes two visually checked locations where the print has ordinary beamed notes. On page 5 the saved book centers a sextuplet symbol inside the PDF text bounds of 何. On page 8 it centers a triplet inside 過. These are lyric recognition errors upstream of chord assignment. The full-score benchmark reports both under `checkedTupletsOverLyrics`, using the pinned PDF edition and the saved book's page dimensions. An empty list means no tuplet was found over that character. A missing sheet or book is reported as null. This check does not measure all tuplets or establish a general threshold for changing their recognition.
