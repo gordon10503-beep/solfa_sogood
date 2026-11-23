@@ -119,6 +119,14 @@ def main():
             jumps = [(a, b) for a, b in zip(order, order[1:]) if b != a+1]
             report["repeatJumps"] = jumps
             report["matchesFirstAndSecondEndingOnPageTwo"] = jumps[:2] == [(17, 2), (13, 18)]
+            # The last printed system has a vocal lyric extender above piano.
+            # Missing/misgrouped parts are not evidence that a false ending was fixed.
+            piano = next((p for p, info in zip(root.findall("part"), report["parts"])
+                          if info["name"].strip().lower() == "piano" and info["bars"] == 61), None)
+            report["endingMarksOverFinalLyricExtender"] = None if piano is None else [
+                {"bar": i, "type": mark.get("type"), "number": mark.get("number")}
+                for i, bar in enumerate(piano.findall("measure"), 1) if 57 <= i <= 60
+                for mark in bar.findall("barline/ending")]
     else:
         report["error"] = job["error"]
     print(json.dumps(report, indent=2))

@@ -45,7 +45,7 @@ The optional [`score-layout-preflight` skill](skills/score-layout-preflight/SKIL
 
 ### Local choir benchmarks
 
-Studio includes Java changes to Audiveris's notehead matcher and MusicXML exporter. The hosted image builds the patched engine, and the local app can use its own private copy. [Engine changes and build instructions](engine/README.md)
+Studio patches Audiveris's Java code for notehead matching, repeat-bracket detection and MusicXML export. In vocal scores it checks whether an apparent piano ending is a lyric extender under a held vocal note. The hosted image builds the patched engine, and the local app can use its own private copy. [Engine changes, benchmarks and build instructions](engine/README.md)
 
 Run `python -m benchmarks.choir "path/to/score.pdf"` inside the Studio environment. The runner recognizes the three test editions by SHA-256, creates a separate temporary library, and reports part lengths, opening tempo, recognized tuplet groups and elapsed time. The five-page middle benchmark uses Automatic grouping. The fourteen-page advanced benchmark uses SATB + piano and checks the printed 55 bars and opening dotted quarter = 72 (quarter = 108). Grow for Me adds a voice-and-piano example with repeats. The runner compares Part I in bar 3 of the middle score and the first four vocal bars of Grow for Me against manually read pitches, onsets and durations. Append `--opening-profile Poor` or `--opening-profile Leland` to compare two complete first-page scans and retain both exports.
 

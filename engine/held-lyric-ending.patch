@@ -1,0 +1,106 @@
+--- a/PartwiseBuilder.java
++++ b/PartwiseBuilder.java
+@@ -245,6 +245,7 @@
+ import java.util.ArrayList;
+ import java.util.Collections;
+ import java.util.HashMap;
++import java.util.HashSet;
+ import java.util.LinkedHashMap;
+ import java.util.List;
+ import java.util.ListIterator;
+@@ -1162,6 +1163,84 @@
+         }
+     }
+ 
++    // A long lyric extender can be classified as a volta on the staff below it.
++    // Check the completed recognition graph, after syllables and ties are linked.
++    private boolean isHeldLyricLine (EndingInter ending)
++    {
++        if (ending == null || ending.isManual() || ending.getLeftLeg() != null
++                || ending.getRightLeg() != null || ending.getNumber() != null
++                || ending.getValue() != null) {
++            return false;
++        }
++        final SystemInfo system = current.system;
++        final SystemInfo previous = system.getPrecedingInPage();
++        final int index = system.getStaves().indexOf(ending.getStaff());
++        if (index < 1 || previous == null || !previous.getSig().inters(EndingInter.class).isEmpty()
++                || system.getSig().inters(EndingInter.class).size() != 1
++                || system.getStacks().stream().anyMatch(s -> s.isRepeat(LEFT) || s.isRepeat(RIGHT))) {
++            return false;
++        }
++        final Staff voice = system.getStaves().get(index - 1);
++        final Part priorPart = previous.getPartById(voice.getPart().getId());
++        if (voice.getPart() == ending.getStaff().getPart() || priorPart == null
++                || voice.getIndexInPart() >= priorPart.getStaves().size()) {
++            return false;
++        }
++        final Staff priorVoice = priorPart.getStaves().get(voice.getIndexInPart());
++        final Line2D line = ending.getLine();
++        final int space = current.scale.getInterline();
++        final double offset = line.getY1() - voice.getLastLine().yAt(line.getX1());
++        if (offset <= 0 || Math.abs(line.getY2() - voice.getLastLine().yAt(line.getX2()) - offset) > space) {
++            return false;
++        }
++        boolean lyricBaseline = false;
++        for (Inter inter : previous.getSig().inters(LyricItemInter.class)) {
++            final LyricItemInter lyric = (LyricItemInter) inter;
++            final Point2D point = lyric.getLocation();
++            if (lyric.getStaff() == priorVoice && point != null && Math.abs(
++                    point.getY() - priorVoice.getLastLine().yAt(point.getX()) - offset) <= space) {
++                lyricBaseline = true;
++                break;
++            }
++        }
++        if (!lyricBaseline) {
++            return false;
++        }
++        // Require one sustained staff pitch with recognized ties near both
++        // ends. Different pitches, a new text syllable or ambiguous ties abstain.
++        final Set<HeadInter> heads = new HashSet<>();
++        Integer pitch = null;
++        for (Inter inter : system.getSig().inters(HeadInter.class)) {
++            final HeadInter head = (HeadInter) inter;
++            final int x = head.getCenter().x;
++            if (head.getStaff() == voice && x >= line.getX1() && x <= line.getX2() + space) {
++                if (head.getPitch() == null || (pitch != null && head.getIntegerPitch() != pitch)) {
++                    return false;
++                }
++                pitch = head.getIntegerPitch();
++                heads.add(head);
++            }
++        }
++        for (Inter lyric : system.getSig().inters(LyricItemInter.class)) {
++            if (lyric.getStaff() == voice && lyric.getCenter().x >= line.getX1()
++                    && lyric.getCenter().x <= line.getX2()) {
++                return false;
++            }
++        }
++        int ties = 0;
++        boolean left = false, right = false;
++        for (Inter inter : system.getSig().inters(SlurInter.class)) {
++            final SlurInter tie = (SlurInter) inter;
++            final HeadInter first = tie.getHead(LEFT), last = tie.getHead(RIGHT);
++            if (tie.isTie() && heads.contains(first) && heads.contains(last)) {
++                ties++;
++                left |= Math.abs(first.getCenter().x - line.getX1()) <= 5 * space;
++                right |= Math.abs(last.getCenter().x - line.getX2()) <= 2 * space;
++            }
++        }
++        return ties >= 2 && left && right;
++    }
++
+     //----------------//
+     // processBarline //
+     //----------------//
+@@ -1186,8 +1265,9 @@
+             final MeasureStack stack = current.measure.getStack();
+             final PartBarline.Style style = partBarline.getStyle();
+             final List<FermataInter> fermatas = partBarline.getFermatas(); // Top down list
+-            final EndingInter ending = partBarline.getEnding(
++            final EndingInter candidate = partBarline.getEnding(
+                     (location == RightLeftMiddle.RIGHT) ? RIGHT : LEFT);
++            final EndingInter ending = isHeldLyricLine(candidate) ? null : candidate;
+             final String endingValue = (ending != null) ? ending.getValue() : null;
+             String endingNumber = (ending != null) ? ending.getExportedNumber() : null;
+ 

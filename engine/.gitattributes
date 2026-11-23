@@ -1,1 +1,2 @@
-*.patch text eol=lf
+# A single space denotes a context line in a unified diff, even for a blank source line.
+*.patch -text whitespace=-blank-at-eol,-blank-at-eof

@@ -1,0 +1,12 @@
+--- a/EndingsBuilder.java
++++ b/EndingsBuilder.java
+@@ -352,6 +352,9 @@
+ 
+         for (Inter ib : systemBars) {
+             final StaffBarlineInter sBar = (StaffBarlineInter) ib;
++            if (sBar.getStaff() != staff) {
++                continue;
++            }
+             final Point2D center = sBar.getReferenceCenter();
+ 
+             if ((center.getX() > leftEnd.x + params.maxBarShift) && (center.getX() < rightEnd.x
