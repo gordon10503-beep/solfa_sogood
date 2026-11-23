@@ -9,6 +9,25 @@ def measure_order(root, count):
     Bound expansions so malformed repetition cannot hang the local server.
     """
     measures = root.find("part").findall("measure")
+    numbers = [m.get("number") for m in measures]
+    # A conductor score may print repeat instructions only on a lower staff.
+    # Reuse them only when that part has the same bar numbering and order.
+    repeats = {}
+    endings = {}
+    for part in root.findall("part"):
+        bars = part.findall("measure")
+        if [m.get("number") for m in bars] != numbers:
+            continue
+        for mi, bar in enumerate(bars):
+            for line in bar.findall("barline"):
+                for repeat in line.findall("repeat"):
+                    kind = repeat.get("direction")
+                    at = mi
+                    if kind == "forward" and line.get("location") == "right": at += 1
+                    if kind == "backward" and line.get("location") == "left": at -= 1
+                    repeats.setdefault((at,kind), repeat)
+            marks = bar.findall("barline/ending")
+            if marks: endings.setdefault(mi, marks)
     order, repeated = [], {}
     seen_forwards = set()
     index, start, pass_number, ending = 0, 0, 1, None
@@ -19,18 +38,18 @@ def measure_order(root, count):
             raise ValueError("Repeat navigation is too complex. Simplify repeats in MusicXML.")
         m = measures[index] if index < len(measures) else None
         if m is not None:
-            if m.find("barline/repeat[@direction='forward']") is not None:
+            if (index,"forward") in repeats:
                 if index not in seen_forwards:
                     pass_number = 1
                     seen_forwards.add(index)
                 start = index
-            for e in m.findall("barline/ending"):
+            for e in endings.get(index, []):
                 if e.get("type") == "start":
                     try: ending = {int(n.strip()) for n in e.get("number", "1").split(",")}
                     except ValueError: ending = None
         if ending is None or pass_number in ending:
             order.append(index)
-        backward = m.find("barline/repeat[@direction='backward']") if m is not None else None
+        backward = repeats.get((index,"backward"))
         if backward is not None:
             times = max(1, min(8, int(backward.get("times", "2"))))
             done = repeated.get(index, 1)
@@ -41,7 +60,9 @@ def measure_order(root, count):
                 ending = None
                 continue
             start = index + 1
-        if m is not None and any(e.get("type") in ("stop", "discontinue") for e in m.findall("barline/ending")):
+        if m is not None and any(e.get("type") in ("stop", "discontinue") for e in endings.get(index, [])):
+            if ending and pass_number in ending and backward is None:
+                pass_number = 1
             ending = None
         index += 1
     return order

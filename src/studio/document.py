@@ -237,8 +237,114 @@ def inspect(root, mode="movable", minor_do=False):
             if depth > 1:
                 issues.append({"message": "Nested repeats require manual playback navigation. Unroll the repeat in MusicXML for accurate timing."})
         else: depth = max(0, depth - 1)
+    for pi, mi, _, _, pitch, octave in octave_repairs(root):
+        issues.append({"code": "unclosed-15ma", "part": pi, "measure": mi,
+                       "message": f"Unclosed two-octave mark. A matching staff and the next note suggest octave {octave} for {pitch.findtext('step')}. Compare the PDF before applying."})
     return {"title": root.findtext("work/work-title") or root.findtext("movement-title") or "Untitled score",
-            "composer": root.findtext("identification/creator", ""), "parts": parts, "notes": notes, "issues": issues}
+            "composer": root.findtext("identification/creator", ""), "parts": parts, "notes": notes, "issues": issues,
+            "shortFirstEndings": [bar for bar, _ in single_bar_first_endings(root)]}
+
+
+def single_bar_first_endings(root):
+    """Locate first endings that close immediately at a repeat before ending 2."""
+    if root.find(".//ending") is None:
+        return
+    parts = [part.findall("measure") for part in root.findall("part")]
+    numbering = [m.get("number") for m in parts[0]]
+    if any([m.get("number") for m in part] != numbering for part in parts[1:]):
+        return
+    for i in range(1, len(numbering)-1):
+        openings = []
+        for bars in parts:
+            bar = bars[i]
+            left = bar.find("barline[@location='left']")
+            mark = left.find("ending[@type='start'][@number='1']") if left is not None else None
+            if mark is not None:
+                openings.append((bars, left, mark))
+        if (openings and all(bars[i].find("barline/ending[@type='stop'][@number='1']") is not None for bars, _, _ in openings)
+                and any(bars[i].find("barline/repeat[@direction='backward']") is not None for bars in parts)
+                and any(bars[i+1].find("barline/ending[@type='start'][@number='2']") is not None for bars in parts)):
+            yield i, openings
+
+
+def extend_first_ending(data, end_bar, start_bar):
+    root = read_xml(data)
+    if not isinstance(start_bar, int) or not isinstance(end_bar, int) or not 0 <= start_bar < end_bar:
+        raise ValueError("Choose an earlier starting bar for the first ending.")
+    for end, openings in single_bar_first_endings(root):
+        if end != end_bar:
+            continue
+        for part in root.findall("part"):
+            bars = part.findall("measure")
+            prior = [mark for bar in bars[:start_bar] for mark in bar.findall("barline/ending")]
+            if prior and prior[-1].get("type") == "start":
+                raise ValueError("The chosen bar is already inside another ending.")
+            for bar in bars[start_bar:end]:
+                if bar.find("barline/ending") is not None or bar.find("barline/repeat") is not None:
+                    raise ValueError("This change would cross an existing repeat or numbered ending.")
+        for bars, old_line, mark in openings:
+            old_line.remove(mark)
+            if not len(old_line):
+                bars[end].remove(old_line)
+            target = bars[start_bar]
+            line = target.find("barline[@location='left']")
+            if line is None:
+                line = ET.Element("barline", location="left")
+                target.insert(0, line)
+            line.append(mark)
+        return xml_bytes(root)
+    raise ValueError("This bar has no matching one-bar first ending.")
+
+
+def octave_repairs(root):
+    """Suggest only isolated, unclosed 15ma errors corroborated by a unison staff."""
+    def spelling(note):
+        return (note.findtext("pitch/step"), note.findtext("pitch/alter", "0"), note.findtext("pitch/octave"))
+
+    parts = root.findall("part")
+    bars = [part.findall("measure") for part in parts]
+    for pi, part in enumerate(parts):
+        if part.find(".//octave-shift") is None:
+            continue
+        shifts = part.findall(".//octave-shift")
+        for mi, bar in enumerate(bars[pi][:-1]):
+            for direction in bar.findall("direction"):
+                shift = direction.find("direction-type/octave-shift[@type='down'][@size='15']")
+                if shift is None or len(direction) != 1 or len(direction[0]) != 1:
+                    continue
+                if any(other is not shift and other.get("number", "1") == shift.get("number", "1") for other in shifts):
+                    continue
+                if len(bar) < 2 or bar[-2] is not direction or bar[-1].tag != "note":
+                    continue
+                note = bar[-1]
+                stem = note.find("stem")
+                pitch = note.find("pitch")
+                if pitch is None or stem is None or not note.findtext("lyric/text") or not note.get("default-x") or not stem.get("default-y"):
+                    continue
+                octave = int(pitch.findtext("octave"))
+                wanted = (pitch.findtext("step"), pitch.findtext("alter", "0"), str(octave-2))
+                next_note = bars[pi][mi+1].find("note")
+                if next_note is None or spelling(next_note) != wanted:
+                    continue
+                for pj, other in enumerate(bars):
+                    if pj == pi or len(other) <= mi or other[mi].get("number") != bar.get("number"):
+                        continue
+                    peers = [n for n in other[mi].findall("note") if n.get("default-x")==note.get("default-x")
+                             and n.findtext("duration")==note.findtext("duration") and n.findtext("lyric/text")==note.findtext("lyric/text")
+                             and n.find("stem") is not None and n.findtext("stem")==stem.text and n.find("stem").get("default-y")==stem.get("default-y")]
+                    if len(peers) == 1 and spelling(peers[0]) == wanted:
+                        yield pi, mi, bar, direction, pitch, octave-2
+                        break
+
+
+def repair_octave(data, part, measure):
+    root = read_xml(data)
+    for pi, mi, bar, direction, pitch, octave in octave_repairs(root):
+        if (pi, mi)==(part, measure):
+            bar.remove(direction)
+            pitch.find("octave").text = str(octave)
+            return xml_bytes(root)
+    raise ValueError("No corroborated octave correction in this bar.")
 
 
 def prepare_render_structure(root, info):
@@ -272,6 +378,32 @@ def prepare_render_structure(root, info):
         info["issues"].append({"code": "broken-endings", "message": "Recognition produced incomplete or overlapping repeat endings. Their brackets are hidden in the display to keep opening bars visible. Saved notation is unchanged; repeat playback still needs review."})
 
 
+def mark_implicit_tuplets(m, info, pi, mi):
+    """Mark complete duration-verified groups on a working copy."""
+    tuplet_run = []
+    explicit_voices = {(n.findtext("staff", "1"), n.findtext("voice", "1"))
+                       for n in m.findall("note") if n.find("notations/tuplet") is not None}
+    for ni,n in enumerate(m.findall("note")):
+        tm = n.find("time-modification")
+        voice = (n.findtext("staff", "1"), n.findtext("voice", "1"))
+        if tm is not None and voice not in explicit_voices and n.find("chord") is None:
+            signature = (tm.findtext("actual-notes"), tm.findtext("normal-notes"), voice, n.findtext("type"), len(n.findall("dot")))
+            expected = DURATIONS.get(signature[3], 0) * sum(.5**i for i in range(signature[4]+1))
+            if abs(expected * int(signature[1]) / int(signature[0]) - info["notes"][f"ss-p{pi}-m{mi}-n{ni}"]["duration"]) > 1e-5:
+                tuplet_run = []
+                continue
+            if tuplet_run and tuplet_run[0][0] != signature: tuplet_run = []
+            tuplet_run.append((signature, n))
+            if len(tuplet_run) == int(signature[0]):
+                info["notes"][f"ss-p{pi}-m{mi}-n{ni-len(tuplet_run)+1}"]["tupletStart"] = signature[0]
+                for which, node in (("start", tuplet_run[0][1]), ("stop", tuplet_run[-1][1])):
+                    notation = node.find("notations")
+                    if notation is None: notation = child(node, "notations")
+                    child(notation, "tuplet", type=which, number="1")
+                tuplet_run = []
+        else: tuplet_run = []
+
+
 def engrave(data, mode="movable", minor_do=False, solfa=True, paper=None, compact=False, tenor_part="auto", show_lyrics=True):
     import verovio
     root = read_xml(data)
@@ -299,9 +431,6 @@ def engrave(data, mode="movable", minor_do=False, solfa=True, paper=None, compac
     # Supply omitted note types for otherwise valid duration-only MusicXML.
     for pi, p in enumerate(root.findall("part")):
         for mi, m in enumerate(p.findall("measure")):
-            tuplet_run = []
-            explicit_voices = {(n.findtext("staff", "1"), n.findtext("voice", "1"))
-                               for n in m.findall("note") if n.find("notations/tuplet") is not None}
             for ni, n in enumerate(m.findall("note")):
                 nid = f"ss-p{pi}-m{mi}-n{ni}"
                 n.set("id", nid)
@@ -313,25 +442,7 @@ def engrave(data, mode="movable", minor_do=False, solfa=True, paper=None, compac
                             child(n, "dot")
                     else:
                         info["issues"].append({"part": pi, "measure": mi, "message": "Missing rhythmic type for a tuplet or unusual duration. Correct MusicXML before relying on playback."})
-                # MusicXML allows a tuplet ratio without explicit bracket
-                # notation. Supply complete simple groups in the render copy.
-                tm = n.find("time-modification")
-                voice = (n.findtext("staff", "1"), n.findtext("voice", "1"))
-                if tm is not None and voice not in explicit_voices and n.find("chord") is None:
-                    signature = (tm.findtext("actual-notes"), tm.findtext("normal-notes"), voice, n.findtext("type"), len(n.findall("dot")))
-                    expected = DURATIONS.get(signature[3], 0) * sum(.5**i for i in range(signature[4]+1))
-                    if abs(expected * int(signature[1]) / int(signature[0]) - info["notes"][nid]["duration"]) > 1e-5:
-                        tuplet_run = []
-                        continue
-                    if tuplet_run and tuplet_run[0][0] != signature: tuplet_run = []
-                    tuplet_run.append((signature, n))
-                    if len(tuplet_run) == int(signature[0]):
-                        for which, node in (("start", tuplet_run[0][1]), ("stop", tuplet_run[-1][1])):
-                            notation = node.find("notations")
-                            if notation is None: notation = child(node, "notations")
-                            child(notation, "tuplet", type=which, number="1")
-                        tuplet_run = []
-                else: tuplet_run = []
+            mark_implicit_tuplets(m, info, pi, mi)
     with RENDER_LOCK:
         verovio.setDefaultResourcePath(str(Path(verovio.__file__).parent / "data"))
         tk = verovio.toolkit()
@@ -652,15 +763,31 @@ def edit_symbol(data, nid, symbol):
 
 
 def remove_tuplet(data, nid):
-    """Restore written note lengths in one explicitly marked, single-voice group."""
+    """Restore written lengths in an explicit or duration-verified single-voice group."""
     root = read_xml(data)
-    item = inspect(root)["notes"].get(nid)
+    info = inspect(root)
+    item = info["notes"].get(nid)
     if item is None:
         raise ValueError("Choose the first note of a tuplet.")
     measures = root.findall("part")[item["part"]].findall("measure")
     measure = measures[item["measure"]]
     notes = measure.findall("note")
     first = notes[item["index"]]
+    if first.find("notations/tuplet") is None:
+        # Infer on a separate bar so saving this edit cannot add marks to
+        # unrelated groups elsewhere in the same measure.
+        import copy
+        probe = copy.deepcopy(measure)
+        mark_implicit_tuplets(probe, info, item["part"], item["measure"])
+        inferred = probe.findall("note")
+        if inferred[item["index"]].find("notations/tuplet[@type='start']") is not None:
+            for note, model in zip(notes[item["index"]:], inferred[item["index"]:]):
+                marker = model.find("notations/tuplet")
+                if marker is None: continue
+                notation = note.find("notations")
+                if notation is None: notation = child(note, "notations")
+                notation.append(copy.deepcopy(marker))
+                if marker.get("type")=="stop": break
     opening = first.find("notations/tuplet[@type='start']")
     if opening is None:
         raise ValueError("This group needs voice-aware correction in the MusicXML editor.")

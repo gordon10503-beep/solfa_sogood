@@ -31,7 +31,7 @@ from xml.etree.ElementTree import ParseError
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from .document import (MAX_BYTES, append_bar, remove_tuplet, edit_symbol, move_part, rename_part, edit_note, insert_after_note, place_note, edit_meter, engrave, inspect,
+from .document import (MAX_BYTES, repair_octave, extend_first_ending, append_bar, remove_tuplet, edit_symbol, move_part, rename_part, edit_note, insert_after_note, place_note, edit_meter, engrave, inspect,
                        new_score, read_xml, replace_bar, xml_bytes)
 
 from PIL import Image
@@ -152,8 +152,9 @@ class Library:
 
     def list(self):
         with self.connect() as db:
-            return [{"id": r["id"], **json.loads(r["meta"]), "updated": r["updated"], "revision": r["revision"]}
-                    for r in db.execute("SELECT id,meta,updated,revision FROM scores ORDER BY updated DESC")]
+            return [{"id": r["id"], **json.loads(r["meta"]), "updated": r["updated"],
+                     "revision": r["revision"], "sourceType": r["source_type"]}
+                    for r in db.execute("SELECT id,meta,updated,revision,source_type FROM scores ORDER BY updated DESC")]
 
     def get(self, sid):
         with self.connect() as db:
@@ -163,12 +164,50 @@ class Library:
             result["meta"] = json.loads(result["meta"])
             return result
 
+    @functools.lru_cache(maxsize=64)
+    def legacy_page_sizes(self, sid):
+        # Older rows predate saved page dimensions. Cache just the numbers.
+        with self.connect() as db:
+            row = db.execute("SELECT source,source_type FROM scores WHERE id=?", (sid,)).fetchone()
+            return pdf_dimensions(row)
+
+    def reader_row(self, sid):
+        with self.connect() as db:
+            row = db.execute("SELECT id,xml,meta,source_type,revision,source IS NOT NULL AS has_source FROM scores WHERE id=?", (sid,)).fetchone()
+            if row is None:
+                raise ValueError("Score not found.")
+            result = dict(row)
+        result["meta"] = json.loads(result["meta"])
+        sizes = result["meta"].get("pdfPageSizes")
+        if sizes is None and result["source_type"] == "application/pdf":
+            sizes = self.legacy_page_sizes(sid)
+        return result, sizes or []
+
+    @functools.lru_cache(maxsize=8)
+    def first_pdf_sheet(self, sid):
+        """Cache a bounded screen raster of the immutable original, per library."""
+        import pymupdf
+        with self.connect() as db:
+            row = db.execute("SELECT source FROM scores WHERE id=? AND source_type='application/pdf'", (sid,)).fetchone()
+        if row is None or not row["source"]:
+            raise ValueError("No original PDF is attached.")
+        with pymupdf.open(stream=row["source"], filetype="pdf") as doc:
+            page = doc[0]
+            width, height = page.rect.width, page.rect.height
+            if width <= 0 or height <= 0:
+                raise ValueError("Invalid PDF page dimensions.")
+            scale = min(1.4, (2_000_000 / (width * height)) ** .5, 4096 / max(width, height))
+            bitmap = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
+            return bitmap.tobytes("png")
+
     def add(self, data, meta=None, source=None, source_type=None):
         root = read_xml(data)
         info = inspect(root)
         sid = uuid.uuid4().hex
         meta = {"title": info["title"], "composer": info["composer"], "group": "Ungrouped",
                 "bookmarks": [], "reviewed": False, "origin": "MusicXML", **(meta or {})}
+        if source_type == "application/pdf":
+            meta["pdfPageSizes"] = pdf_dimensions({"source": source, "source_type": source_type})
         with self.connect() as db:
             self.lock_writes(db)
             meta["title"] = available_title(db, meta["title"])
@@ -370,11 +409,10 @@ class Handler(BaseHTTPRequestHandler):
             if path.path.startswith("/api/job/"):
                 return self.respond(scan_status(self.workspace, path.path.split("/")[-1]))
             if path.path.startswith("/api/score/"):
-                row = self.workspace.library.get(path.path.split("/")[-1])
+                row, sizes = self.workspace.library.reader_row(path.path.split("/")[-1])
                 q = parse_qs(path.query)
                 mode = q.get("mode", ["movable"])[0]
                 if mode not in ("movable", "fixed", "pitch"): raise ValueError("Invalid sol-fa mode.")
-                sizes = pdf_dimensions(row)
                 chosen = [int(n) for n in row["meta"].get("scanPages",[]) if 1 <= int(n) <= len(sizes)]
                 paper = tuple(sizes[(chosen or [1])[0]-1]) if sizes else None
                 minor = q.get("minor") == ["true"]
@@ -390,8 +428,11 @@ class Handler(BaseHTTPRequestHandler):
                         show_lyrics = show_lyrics == "true"
                     result = rendered(row["xml"], mode, minor, q.get("solfa", ["true"])[0] == "true", paper, q.get("compact")==["true"], q.get("tenor", ["auto"])[0], show_lyrics)
                     if q.get("reader") == ["pages"]:
-                        return self.respond({key: result.get(key) for key in ("pages", "issues", "engravingLog")})
-                return self.respond({**result, "sourceSizes": sizes, "sourcePages": chosen, "id": row["id"], "meta": row["meta"], "revision": row["revision"], "hasSource": row["source"] is not None, "sourceType": row["source_type"], "title": row["meta"].get("title", result["title"])})
+                        page_data = {key: result.get(key) for key in ("pages", "issues", "engravingLog")}
+                        page_data["tupletStarts"] = {key: note["tupletStart"] for key, note in result["notes"].items()
+                                                    if "tupletStart" in note}
+                        return self.respond(page_data)
+                return self.respond({**result, "sourceSizes": sizes, "sourcePages": chosen, "id": row["id"], "meta": row["meta"], "revision": row["revision"], "hasSource": bool(row["has_source"]), "sourceType": row["source_type"], "title": row["meta"].get("title", result["title"])})
             if path.path.startswith("/api/bundle/"):
                 row = self.workspace.library.get(path.path.split("/")[-1])
                 title = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", row["meta"]["title"]).strip(" .")[:120] or "Score"
@@ -405,9 +446,14 @@ class Handler(BaseHTTPRequestHandler):
             if path.path.startswith("/api/xml/"):
                 row = self.workspace.library.get(path.path.split("/")[-1])
                 return self.respond(row["xml"], "application/vnd.recordare.musicxml+xml")
+            if path.path.startswith("/api/pdf-cover/"):
+                sid = path.path.split("/")[-1]
+                data = self.workspace.library.first_pdf_sheet(sid)
+                return self.respond(data, "image/png", etag='"' + hashlib.sha256(data).hexdigest() + '"')
             if path.path.startswith("/api/source/"):
-                row = self.workspace.library.get(path.path.split("/")[-1])
-                if row["source"] is None: raise ValueError("No source scan is attached.")
+                with self.workspace.library.connect() as db:
+                    row = db.execute("SELECT source,source_type FROM scores WHERE id=?", (path.path.split("/")[-1],)).fetchone()
+                if row is None or row["source"] is None: raise ValueError("No source scan is attached.")
                 return self.respond(row["source"], row["source_type"], etag='"' + hashlib.sha256(row["source"]).hexdigest() + '"')
             if path.path == "/api/session": return self.respond({"token": self.workspace.token, "username": self.username})
             relative = "index.html" if path.path == "/" else path.path.lstrip("/")
@@ -517,6 +563,8 @@ class Handler(BaseHTTPRequestHandler):
                 action = payload["action"]
                 metadata = None
                 if action == "note": data = edit_note(row["xml"], **payload["values"])
+                elif action == "repair-octave": data = repair_octave(row["xml"], **payload["values"])
+                elif action == "extend-first-ending": data = extend_first_ending(row["xml"], **payload["values"])
                 elif action == "place": data = place_note(row["xml"], **payload["values"])
                 elif action == "insert-note": data = insert_after_note(row["xml"], **payload["values"])
                 elif action == "remove-tuplet": data = remove_tuplet(row["xml"], **payload["values"])

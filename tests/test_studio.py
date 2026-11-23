@@ -311,6 +311,10 @@ def test_local_http_import_edit_export_and_origin_checks(tmp_path):
         pdf = (Path(__file__).resolve().parents[1] / "benchmarks/fixtures/duet.pdf").read_bytes()
         score = server.library.add(melody(), source=pdf, source_type="application/pdf")
         url = f"/api/score/{score}"
+        with request(f"/api/pdf-cover/{score}") as cover:
+            assert cover.headers["Content-Type"] == "image/png"
+            assert cover.read().startswith(b"\x89PNG\r\n\x1a\n")
+        assert request(f"/api/source/{score}").read() == pdf
         preview = json.load(request(url+"?reader=pdf"))
         assert preview["deferredNotation"] and preview["pages"] == [] and preview["events"]
         pages = json.load(request(url+"?reader=pages&version="+preview["notationVersion"]))

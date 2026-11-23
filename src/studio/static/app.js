@@ -67,6 +67,9 @@ async function openScore(id, preserve=false, initialView="read") {
   const oldPosition=preserve?state.position:0, oldScroll=preserve?$("score-scroll").scrollTop:0;
   ensureNotation=null;
   busy(true,"Opening score…");
+  if(!preserve && state.library.find(s=>s.id===id)?.sourceType==="application/pdf"){
+    StudioPDF.preload(id);
+  }
   const lyricPreference=localStorage.getItem("notation-lyrics-"+id)||"auto";
   const scoreUrl=`/api/score/${id}?mode=${$("solfa-mode").value}&lyrics=${lyricPreference}&tenor=${encodeURIComponent(localStorage.getItem("tenor-clef-"+id)||"auto")}&minor=${$("minor-do").checked}&compact=${$("compact-staves").checked}&solfa=${$("solfa").checked}`;
   const result=await api(scoreUrl+(!preserve||state.view==="original"?"&reader=pdf":""));
@@ -81,11 +84,13 @@ async function openScore(id, preserve=false, initialView="read") {
   clefs.value=localStorage.getItem("tenor-clef-"+id)||"auto";
   if(state.view==="original" && result.sourceType!=="application/pdf")state.view="read";
   state.position=Math.min(oldPosition,result.duration);state.selected=null;document.querySelectorAll("[data-symbol]").forEach(b=>b.disabled=true);
-  const listen=$("listen-part"), sounding=new Set(result.events.map(e=>e.part));
+  state.partPitches=result.parts.map(()=>new Set());
+  for(const e of result.events)state.partPitches[e.part].add(e.pitch);
+  const listen=$("listen-part");
   const previous=preserve?listen.value:"";
-  listen.replaceChildren(new Option("Listen: current mix",""),...result.parts.flatMap((p,i)=>sounding.has(i)?[new Option("Hear "+p.name+" only",String(i))]:[]));
+  listen.replaceChildren(new Option("Listen: current mix",""),...result.parts.flatMap((p,i)=>state.partPitches[i].size?[new Option("Hear "+p.name+" only",String(i))]:[]));
   listen.value=previous;
-  listen.disabled=!sounding.size || result.meta.playbackReady===false;
+  listen.disabled=!result.events.length || result.meta.playbackReady===false;
   state.mixer=result.parts.map((p,i)=>({...{sounds:["Piano"],volume:.7,mute:false,solo:false},...(result.meta.mixer?.[i]||{})}));
   if(!preserve) {
     const practice=result.meta.practice||{};
@@ -135,6 +140,18 @@ async function openScore(id, preserve=false, initialView="read") {
         for(const [key,value] of Object.entries({x:box.x-12,y:box.y-12,width:box.width+24,height:box.height+24,rx:12}))marker.setAttribute(key,String(value));
         marker.classList.add('playback-bar-marker');marker.setAttribute('aria-hidden','true');measure.insertBefore(marker,measure.firstChild);
       });
+      for(const group of container.querySelectorAll(".tuplet")){
+        const start=group.querySelector(".note[id],.rest[id]");
+        if(!result.notes[start?.id]?.tupletStart)continue;
+        for(const mark of group.querySelectorAll(":scope > .tupletNum,:scope > .tupletBracket")){
+          const title=document.createElementNS("http://www.w3.org/2000/svg","title");
+          title.textContent="Check score: click to restore regular note lengths";
+          mark.prepend(title);
+          mark.addEventListener("click",run(async()=>{
+            if(state.view==="review")await edit("remove-tuplet",{nid:start.id});
+          }));
+        }
+      }
       notes.forEach(([note,bounds])=>{
         note.setAttribute("tabindex","0");note.setAttribute("role","button");
         // SVG groups otherwise only respond on the thin painted note/stem paths.
@@ -142,8 +159,15 @@ async function openScore(id, preserve=false, initialView="read") {
         const hit=document.createElementNS("http://www.w3.org/2000/svg","rect");
         for(const [key,value] of Object.entries({x:bounds.x-20,y:bounds.y-20,width:bounds.width+40,height:bounds.height+40,fill:"transparent","pointer-events":"all"}))hit.setAttribute(key,String(value));
         hit.setAttribute("aria-hidden","true");note.insertBefore(hit,note.firstChild);
-        const n=result.notes[note.id];note.setAttribute("aria-label",`${result.parts[n.part].name}, bar ${n.measure+1}, ${n.rest?"rest":n.step+n.octave}`);
-        if(n.pitched) bindPitchDrag(note,n);
+        const n=result.notes[note.id];
+        const accidental=({"0":"","1":"♯","-1":"♭","2":"𝄪","-2":"𝄫"}[n.alter] ?? `(${n.alter>0?"+":""}${n.alter})`);
+        const pitch=n.step+accidental+n.octave;
+        note.setAttribute("aria-label",`${result.parts[n.part].name}, bar ${n.measure+1}, ${n.pitched?pitch:n.rest?"rest":"unpitched note"}`);
+        if(n.pitched){
+          const title=document.createElementNS("http://www.w3.org/2000/svg","title");
+          title.textContent=pitch;
+          note.prepend(title);bindPitchDrag(note,n);
+        }
         note.addEventListener("click",()=>selectNote(note.id));note.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();selectNote(note.id);}});
       });
     }
@@ -162,6 +186,9 @@ async function openScore(id, preserve=false, initialView="read") {
     const notation=await loading;
     if(generation!==state.openGeneration || !result.deferredNotation || state.view==="original")return;
     lastNotation={url,data:notation};
+    for(const [id, count] of Object.entries(notation.tupletStarts || {})){
+      if(result.notes[id])result.notes[id].tupletStart=count;
+    }
     Object.assign(result,notation,{deferredNotation:false});
     mountNotation();renderIssues();
   };
@@ -228,7 +255,7 @@ function bindPitchDrag(note, n) {
     drag = null; $("drag-pitch").hidden=true;
     if (!target.moved || (target.step===n.step && target.octave===n.octave)) return;
     await edit("note", {nid:n.id, step:target.step, octave:target.octave, alter:n.alter});
-    if(state.view==="compose")selectNote(n.id);
+    if(["review","compose"].includes(state.view))selectNote(n.id);
   }));
 }
 
@@ -242,7 +269,7 @@ function selectNote(id) {
   $("insert-key").disabled=false;
   $("note-step").value=n.step;$("note-alter").value=n.alter;$("note-octave").value=n.octave;$("note-lyric").value=n.lyric;
   $("note-selection").textContent=`${state.score.parts[n.part].name} · bar ${n.measure+1} · ${n.duration} quarter beats`;
-  $("apply-note").disabled=!n.pitched;$("compose-part").value=n.part;fillBars(n.measure);setView("compose");
+  $("apply-note").disabled=!n.pitched;$("compose-part").value=n.part;fillBars(n.measure);if(state.view!=="review")setView("compose");
 }
 function fillComposer() { renderInstrumentNames(); $("compose-part").innerHTML=state.score.parts.map((p,i)=>`<option value="${i}">${esc(p.name)}</option>`).join("");fillBars(state.currentMeasure); }
 function fillBars(index=0) {
@@ -319,7 +346,7 @@ function renderBookmarks() {
 }
 function jumpBar(index,part=0) {
   pause();state.currentMeasure=index;
-  const events=state.score.events.filter(e=>e.measure===index);state.position=events[0]?.time??state.score.measureTimes[index]?.time??0;
+  state.position=state.score.measureTimes.find(bar=>bar.measure===index)?.time??0;
   const note=Object.values(state.score.notes).find(n=>n.measure===index && n.part===part);
   if(note && $(note.id)) scrollToElement($(note.id));
   updateTransport();
@@ -381,6 +408,28 @@ function renderIssues() {
   const groups = [...bars].sort(([a], [b]) => a-b).map(([bar, entries], index) =>
     `<details ${index === 0 ? "open" : ""}><summary>Bar ${bar+1} · ${entries.length} to check</summary>${entries.join("")}</details>`);
   $("issues").innerHTML = [...notices, ...groups].join("") || '<p class="empty-hint">No structural warnings. Compare pitches and symbols with the original.</p>';
+  if(state.score.shortFirstEndings?.length){
+    const panel=document.createElement("details");
+    panel.innerHTML='<summary>Check first endings</summary><p class="hint">If a first-ending bracket begins on an earlier line of the PDF, choose the bar where it starts.</p>';
+    for(const end of state.score.shortFirstEndings){
+      const label=document.createElement("label"),input=document.createElement("input"),button=document.createElement("button");
+      label.className="field";label.textContent="First ending at bar "+(end+1)+" · starts at bar";
+      input.type="number";input.min=1;input.max=end;input.value=end;
+      label.append(input);
+      button.className="button small";button.textContent="Extend first ending";
+      button.onclick=run(async()=>{
+        if(input.reportValidity() && input.value!=="")await edit("extend-first-ending",{end_bar:end,start_bar:input.valueAsNumber-1});
+      });
+      panel.append(label,button);
+    }
+    $("issues").prepend(panel);
+  }
+  for(const issue of issues.filter(i=>i.code==="unclosed-15ma")){
+    const fix=document.createElement("button");fix.className="button small";
+    fix.textContent="Remove false 15ma and lower the note · bar "+(issue.measure+1);
+    fix.onclick=run(()=>edit("repair-octave",{part:issue.part,measure:issue.measure}));
+    $("issues").prepend(fix);
+  }
   const tuplets=Object.values(state.score.notes).filter(n=>n.tupletStart);
   if(tuplets.length && state.score.meta.origin==="Scan"){
     const panel=document.createElement("details");
@@ -397,7 +446,16 @@ function renderIssues() {
     $("issues").prepend(panel);
   }
   if(state.score.engravingLog) { const details=document.createElement("details");details.innerHTML='<summary class="hint">Engraver notices</summary>';const p=document.createElement("p");p.className="hint";p.textContent=state.score.engravingLog;details.appendChild(p);$("issues").appendChild(details); }
-  $("issues").querySelectorAll("[data-issue]").forEach(b=>b.onclick=()=>{const i=issues[+b.dataset.issue];if(i.measure!==undefined){jumpBar(i.measure,i.part);renderRhythmReport(i.measure);$("compose-part").value=i.part;fillBars(i.measure);$("meter-bar").value=i.measure+1;if(i.code==="missing-meter"){$("meter-bar").closest("details").open=true;$("meter-beats").focus();}else{setView("compose");$("phrase").closest("details").open=true;toast("This part and bar are selected. Click a note to change pitch, or use the bar composer to replace its rhythm.");}}});
+  $("issues").querySelectorAll("[data-issue]").forEach(button=>button.onclick=()=>{
+    const issue=issues[+button.dataset.issue];
+    jumpBar(issue.measure,issue.part);
+    renderRhythmReport(issue.measure);
+    $("compose-part").value=issue.part;fillBars(issue.measure);
+    $("meter-bar").value=issue.measure+1;
+    if(issue.code==="missing-meter"){
+      $("meter-bar").closest("details").open=true;$("meter-beats").focus();
+    }
+  });
 }
 let textCallback;
 function textDialog(title,label,value,callback) { $("text-title").textContent=title;$("text-label").textContent=label;$("text-value").value=value;textCallback=callback;$("text-dialog").showModal();$("text-value").focus();$("text-value").select(); }
@@ -434,16 +492,31 @@ function tone(pitch,duration,start,sound="Piano",volume=.6) {
 function click(at,accent=false) { tone(accent && $("metro-accent").checked ? 94 : 88,.035,at,"Flute",.5); }
 function silence() { for(const node of state.nodes)try{node.stop();}catch{}state.nodes.clear(); }
 function position() { return state.playing ? Math.min(state.score.duration,(state.audio.currentTime-state.started)*state.speed) : state.position; }
+let playRequest=0, loadingInstruments=false;
 async function play() {
   if(!state.score)return;if(state.playing){pause();return;}
+  const request=++playRequest;
   await audioReady();
+  if(request!==playRequest)return;
   if(state.score.meta.playbackReady===false){toast("Recognition is not ready. The original PDF is available to read and annotate.");return;}
-  busy(true,"Loading sampled instruments…");
+  loadingInstruments=true;busy(true,"Loading sampled instruments…");
   try{
-    const needed=new Map();
-    for(const e of state.score.events){const mix=rehearsalMix(e.part);if(!mix)continue;for(const name of mix.sounds){if(!needed.has(name))needed.set(name,new Set());needed.get(name).add(e.pitch);}}
-    await Promise.all([...needed].map(([name,pitches])=>StudioSamples.load(state.audio,name,[...pitches])));
-  }finally{busy(false);}
+    const needed=new Map(), starters=new Map();
+    state.partPitches.forEach((pitches,part)=>{
+      const mix=rehearsalMix(part);
+      if(!mix || !pitches.size)return;
+      for(const name of mix.sounds){
+        if(!needed.has(name)){needed.set(name,new Set());starters.set(name,new Set());}
+        starters.get(name).add(pitches.values().next().value);
+        for(const pitch of pitches)needed.get(name).add(pitch);
+      }
+    });
+    await Promise.all([...starters].map(([name,pitches])=>StudioSamples.load(state.audio,name,[...pitches])));
+    if(request!==playRequest)return;
+    Promise.all([...needed].map(([name,pitches])=>StudioSamples.load(state.audio,name,[...pitches])))
+      .catch(()=>{if(request===playRequest)toast("Some samples could not load. Playback is using nearby pitches from the same instrument.");});
+  }catch(error){if(request===playRequest)throw error;return;}
+  finally{if(request===playRequest){loadingInstruments=false;busy(false);}}
   state.scrollStart=null;$("scroll-only").textContent="▷ Scroll without sound";
   if(state.position>=state.score.duration-.01)state.position=0;
   state.speed=+$("tempo").value/state.score.baseTempo;
@@ -539,6 +612,8 @@ function schedule() {
   if(!state.playing&&!state.metronome){clearInterval(state.timer);state.timer=null;}
 }
 function pause() {
+  ++playRequest;
+  if(loadingInstruments){loadingInstruments=false;busy(false);}
   if(state.playing)state.position=position();state.playing=false;state.nextQuarter=undefined;silence();
   $("play").textContent="▶";$("play").setAttribute("aria-label","Play score");$("spread-play").title="Play score";$("spread-play").setAttribute("aria-label","Play score");
   if(state.audio)state.metroNext=state.audio.currentTime+.05;
@@ -560,7 +635,35 @@ function updatePlaybackHighlight(p) {
   if(measure){state.currentMeasure=measure.measure;const label=`Bar position ${measure.measure+1}${state.score.meta.reviewed?'':' · draft'}`;if($('playback-location').textContent!==label)$('playback-location').textContent=label;}
   return measure;
 }
+const notationPages=$("pages"),notationTurns=$("notation-turns");
+function notationIndex(){
+  const stride=notationPages.children[1]?.offsetLeft-notationPages.firstElementChild?.offsetLeft;
+  return stride>0?Math.round(notationPages.scrollLeft/stride):0;
+}
+function updateNotationTurns(){
+  if(state.view!=="read" || !document.body.classList.contains("notation-horizontal"))return;
+  const r=notationPages.getBoundingClientRect(),pane=$("score-scroll").getBoundingClientRect();
+  notationTurns.style.left=Math.max(0,r.left)+"px";
+  notationTurns.style.right=Math.max(0,document.documentElement.clientWidth-r.right)+"px";
+  notationTurns.style.top=(Math.max(0,pane.top)+Math.min(innerHeight,pane.bottom))/2+"px";
+  const i=notationIndex();
+  $("notation-prev").disabled=i<=0;
+  $("notation-next").disabled=i>=notationPages.children.length-1;
+}
+function notationDirection(){
+  document.body.classList.toggle("notation-horizontal",$("notation-direction").value==="horizontal");
+  updateNotationTurns();
+}
+$("notation-direction").value=localStorage.getItem("notation-direction")||"vertical";
+notationDirection();
+on("notation-direction","change",()=>{localStorage.setItem("notation-direction",$("notation-direction").value);notationDirection();});
+new ResizeObserver(updateNotationTurns).observe(notationPages);
+notationPages.addEventListener("scroll",updateNotationTurns,{passive:true});
+for(const [id,delta] of [["notation-prev",-1],["notation-next",1]]){
+  on(id,"click",()=>notationPages.children[notationIndex()+delta]?.scrollIntoView({inline:"start",block:"nearest",behavior:"smooth"}));
+}
 function scrollToElement(el) {
+  if(state.view==="read" && document.body.classList.contains("notation-horizontal"))el.closest(".score-page")?.scrollIntoView({inline:"start",block:"nearest"});
   const pane=$("score-scroll"), rect=el.getBoundingClientRect(), parent=pane.getBoundingClientRect();
   pane.scrollTo({top:pane.scrollTop+rect.top-parent.top-90,behavior:"smooth"});
 }
@@ -575,7 +678,7 @@ function animate() {
       if($("follow").checked && $("reader-format").value!=="pdf") {
         const pane=$("score-scroll");
         if($("scroll-mode").value==="timed")pane.scrollTop=(pane.scrollHeight-pane.clientHeight)*Math.min(1,p/state.speed/(+$("scroll-duration").value||120));
-        else if(measure && lastFollow!==measure.id){lastFollow=measure.id;const el=$(measure.id);if(el){const r=el.getBoundingClientRect(),pr=pane.getBoundingClientRect();if(r.top<pr.top+20 || r.bottom>pr.bottom-30)scrollToElement(el);}}
+        else if(measure && lastFollow!==measure.id){lastFollow=measure.id;const el=$(measure.id);if(el){const r=el.getBoundingClientRect(),pr=pane.getBoundingClientRect();if(r.top<pr.top+20 || r.bottom>pr.bottom-30 || r.left>pr.right || r.right<pr.left)scrollToElement(el);}}
       }
     }
   }

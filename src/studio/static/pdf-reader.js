@@ -2,6 +2,31 @@
 window.StudioPDF = (() => {
   const $=id=>document.getElementById(id),redoByPage=new Map();
   let pdf=null,page=1,scoreId=null,marks=[],save=null,tool='pan',stroke=null,observer=null,slots=[],generation=0,comparison=false,savedDirection='vertical',selectedPages=[],request=0;
+  const recentCanvases=new Set();
+  let pendingSource;
+  function preload(id){
+    if(scoreId===id || pendingSource?.id===id)return;
+    if(pendingSource?.task)void pendingSource.task.destroy().catch(()=>{});
+    const pending={id};
+    pendingSource=pending;
+    pending.ready=import('/vendor/pdf.mjs').then(module=>{
+      if(pendingSource!==pending)return null;
+      module.GlobalWorkerOptions.workerSrc='/vendor/pdf.worker.mjs';
+      pending.task=module.getDocument({url:'/api/source/'+id,isEvalSupported:false});
+      return pending.task.promise;
+    });
+    // Start the first sheet independently of PDF.js font and worker setup.
+    // Subsequent sheets and the fallback use the original document in PDF.js.
+    const cover=new Image();
+    cover.src='/api/pdf-cover/'+id;
+    pending.firstCanvas=cover.decode().then(()=>{
+      const canvas=document.createElement('canvas');
+      canvas.width=cover.naturalWidth;canvas.height=cover.naturalHeight;
+      canvas.getContext('2d').drawImage(cover,0,0);
+      return canvas;
+    }).catch(()=>null);
+    pending.ready.catch(()=>{});
+  }
   function controls(){
     $('pdf-undo').disabled=!!stroke||!marks.some(m=>m.page===page);
     $('pdf-redo').disabled=!!stroke||!redoByPage.get(page)?.length;
@@ -26,16 +51,20 @@ window.StudioPDF = (() => {
     svg.onpointercancel=()=>{if(stroke?.page===slot.number){marks.pop();stroke=null;draw(slot);}};
     slot.sheet.onpointerenter=()=>{if(!stroke){page=slot.number;controls();}};
   }
+  async function pageCanvas(doc,number){
+    const page=await doc.getPage(number),viewport=page.getViewport({scale:1.4});
+    const canvas=document.createElement('canvas');canvas.width=viewport.width;canvas.height=viewport.height;
+    await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
+    return canvas;
+  }
   async function render(slot){
     if(slot.canvas||slot.rendering)return;slot.rendering=true;const ticket=generation,doc=pdf;
     try{
-      const p=await doc.getPage(slot.number),viewport=p.getViewport({scale:1.4});
-      const canvas=document.createElement('canvas');canvas.width=viewport.width;canvas.height=viewport.height;
-      await p.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
+      const canvas=await slot.prepared || await pageCanvas(doc,slot.number);
       if(ticket!==generation||!slot.near)return;
-      slot.sheet.style.setProperty('--sheet-ratio',viewport.width/viewport.height);slot.sheet.style.aspectRatio=`${viewport.width}/${viewport.height}`;slot.surface.replaceChildren(canvas);slot.canvas=canvas;
+      slot.sheet.style.setProperty('--sheet-ratio',canvas.width/canvas.height);slot.sheet.style.aspectRatio=`${canvas.width}/${canvas.height}`;slot.surface.replaceChildren(canvas);slot.canvas=canvas;
     }catch(e){if(ticket===generation)slot.surface.textContent='Could not render this page: '+e.message;}
-    finally{slot.rendering=false;}
+    finally{slot.prepared=null;slot.rendering=false;}
   }
   function arrange(){
     observer?.disconnect();
@@ -47,7 +76,14 @@ window.StudioPDF = (() => {
     host.replaceChildren(...groups);$('pdf-direction').disabled=comparison;$('pdf-layout').disabled=comparison;
     observer=new IntersectionObserver(entries=>{
       for(const entry of entries){const slot=slots[+entry.target.dataset.page-1];slot.near=entry.isIntersecting;
-        if(slot.near)render(slot);else if(slot.canvas){slot.surface.replaceChildren();slot.canvas=null;}
+        if(slot.near){recentCanvases.delete(slot);render(slot);}
+        else if(slot.canvas){
+          recentCanvases.add(slot);
+          if(recentCanvases.size>2){
+            const oldest=recentCanvases.values().next().value;
+            recentCanvases.delete(oldest);oldest.surface.replaceChildren();oldest.canvas=null;
+          }
+        }
       }
       const visible=slots.filter(s=>s.near).map(s=>({slot:s,r:s.sheet.getBoundingClientRect()})).filter(x=>x.r.bottom>0&&x.r.right>0).sort((a,b)=>Math.abs(a.r.top-$('score-scroll').getBoundingClientRect().top)-Math.abs(b.r.top-$('score-scroll').getBoundingClientRect().top));
       if(visible.length&&!stroke){page=visible[0].slot.number;controls();}
@@ -59,27 +95,38 @@ window.StudioPDF = (() => {
     if(scoreId!==id||JSON.stringify(marks)!==JSON.stringify(annotations||[]))redoByPage.clear();
     marks=structuredClone(annotations||[]);save=onSave;
     if(scoreId!==id){
-      const [module,response]=await Promise.all([import('/vendor/pdf.mjs'),fetch('/api/source/'+id)]);
-      module.GlobalWorkerOptions.workerSrc='/vendor/pdf.worker.mjs';
-      if(!response.ok)throw new Error('Original PDF is unavailable.');
-      const next=await module.getDocument({data:new Uint8Array(await response.arrayBuffer()),isEvalSupported:false}).promise;
-      if(token!==request){await next.destroy();return;}
-      generation++;observer?.disconnect();if(pdf)await pdf.destroy();pdf=next;scoreId=id;page=1;
+      preload(id);
+      const pending=pendingSource;
+      let next;
+      try{next=await pending.ready;}
+      catch(error){
+        if(token!==request || pendingSource!==pending)return;
+        pendingSource=null;
+        throw error;
+      }
+      if(!next || token!==request || pendingSource!==pending)return;
+      pendingSource=null;
+      generation++;recentCanvases.clear();observer?.disconnect();const previous=pdf;pdf=next;scoreId=id;page=1;
+      if(previous)void previous.destroy().catch(()=>{});
       slots=Array.from({length:pdf.numPages},(_,i)=>{
         const sheet=document.createElement('div'),surface=document.createElement('div'),ink=document.createElementNS('http://www.w3.org/2000/svg','svg');
         sheet.className='pdf-sheet';if(sizes?.[i]){sheet.style.aspectRatio=sizes[i].join('/');sheet.style.setProperty('--sheet-ratio',sizes[i][0]/sizes[i][1]);}sheet.dataset.page=i+1;surface.className='pdf-surface';
         ink.setAttribute('viewBox','0 0 1000 1000');ink.setAttribute('preserveAspectRatio','none');ink.classList.add('pdf-ink');ink.setAttribute('aria-label','Annotations on page '+(i+1));
         const label=document.createElement('span');label.className='pdf-sheet-number';label.textContent=i+1;
-        sheet.append(surface,ink,label);const slot={number:i+1,sheet,surface,ink};bind(slot);return slot;
+        sheet.append(surface,ink,label);const slot={number:i+1,sheet,surface,ink,prepared:i===0?pending.firstCanvas:null};bind(slot);return slot;
       });arrange();
     }else if(pagesChanged)arrange();
-    setTool(tool);redraw();
+    setTool(tool);redraw();scheduleTurns();
   }
   function setTool(next){tool=next;slots.forEach(s=>{s.ink.style.touchAction=tool==='pan'?'auto':'none';s.ink.style.pointerEvents=tool==='pan'?'none':'auto';});document.querySelectorAll('[data-ink]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.ink===tool)));}
   document.querySelectorAll('[data-ink]').forEach(b=>b.onclick=()=>setTool(b.dataset.ink));
   const host=$('pdf-pages'), turns=$('pdf-turns');
   function currentSpread(){
     const groups=host.children;
+    if(host.classList.contains('horizontal') && groups.length>1){
+      const stride=groups[1].offsetLeft-groups[0].offsetLeft;
+      if(stride>0)return Math.min(groups.length-1,Math.round(host.scrollLeft/stride));
+    }
     const horizontal=host.classList.contains('horizontal');
     const bounds=pane.getBoundingClientRect();
     const probe=horizontal?host.getBoundingClientRect().left+host.clientWidth/2:bounds.top+bounds.height/2;
@@ -90,7 +137,8 @@ window.StudioPDF = (() => {
     return groups.length-1;
   }
   function positionTurns(){
-    if(!$('pdf-reader').getClientRects().length)return;
+    turns.hidden=comparison||!host.classList.contains('horizontal')||document.body.dataset.page!=='original';
+    if(turns.hidden||!$('pdf-reader').getClientRects().length)return;
     const rect=$('pdf-reader').getBoundingClientRect(), viewport=pane.getBoundingClientRect();
     turns.style.left=Math.max(0,rect.left)+'px';
     turns.style.right=Math.max(0,document.documentElement.clientWidth-rect.right)+'px';
@@ -163,5 +211,5 @@ window.StudioPDF = (() => {
   $('spread-play').onclick=()=>$('play').click();
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&pane.classList.contains('spread-focus'))focusSpread(false);});
   function setComparison(value){if(comparison===value)return;if(value){savedDirection=$('pdf-direction').value;$('pdf-direction').value='vertical';}else $('pdf-direction').value=savedDirection;comparison=value;if(pdf)arrange();}
-  return {open,setComparison};
+  return {open,setComparison,preload};
 })();

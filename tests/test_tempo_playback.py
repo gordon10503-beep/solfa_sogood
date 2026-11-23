@@ -2,7 +2,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from src.studio.document import inspect, new_score, read_xml
+from src.studio.document import extend_first_ending, inspect, new_score, read_xml, xml_bytes
 from src.studio.playback import build_playback
 
 
@@ -56,3 +56,25 @@ def test_vocal_tie_over_overfilled_accompaniment(stop, attacks):
     assert len(events) == attacks
     if stop:
         assert events[0]["duration"] == pytest.approx(result["duration"])
+
+
+def test_lower_staff_repeat_and_pass_reset_after_second_ending():
+    root = read_xml(new_score(template="satb", bars=6))
+    bars = root.findall("part")[-1].findall("measure")
+    def line(index, location, name, **attrs):
+        ET.SubElement(ET.SubElement(bars[index], "barline", location=location), name, attrs)
+    line(0, "right", "repeat", direction="forward")
+    line(2, "left", "ending", type="start", number="1")
+    line(2, "right", "ending", type="stop", number="1")
+    line(2, "right", "repeat", direction="backward")
+    line(3, "left", "ending", type="start", number="2")
+    line(3, "right", "ending", type="stop", number="2")
+    line(5, "left", "ending", type="start", number="1")
+    order = [b["measure"] for b in build_playback(root, inspect(root))["measureTimes"]]
+    assert order == [0, 1, 2, 1, 3, 4, 5]
+    assert inspect(root)["shortFirstEndings"] == [2]
+    data = xml_bytes(root)
+    changed = read_xml(extend_first_ending(data, end_bar=2, start_bar=1))
+    assert [b["measure"] for b in build_playback(changed, inspect(changed))["measureTimes"]] == [0, 1, 2, 3, 4, 5]
+    with pytest.raises(ValueError, match="cross an existing repeat"):
+        extend_first_ending(data, end_bar=2, start_bar=0)

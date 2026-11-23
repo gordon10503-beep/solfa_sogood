@@ -21,8 +21,16 @@ window.StudioSamples = (() => {
   }
   function play(ctx,master,nodes,pitch,duration,start,name,volume) {
     const bank=banks.get(name);if(!bank)throw new Error(`${name} is still loading.`);
-    const key=sampleKey(pitch);
-    if(!bank.has(key))throw new Error(`${name} note ${key} is still loading.`);
+    let key=sampleKey(pitch);
+    if(!bank.has(key)){
+      if(!bank.size)throw new Error(`${name} is still loading.`);
+      // The remaining samples stream in after playback starts. Transpose a
+      // decoded sample from this instrument until its exact key is ready.
+      let distance=Infinity;
+      for(const loaded of bank.keys()){
+        if(Math.abs(loaded-pitch)<distance){distance=Math.abs(loaded-pitch);key=loaded;}
+      }
+    }
     const source=ctx.createBufferSource(),gain=ctx.createGain();
     source.buffer=bank.get(key);source.playbackRate.value=2**((pitch-key)/12);
     gain.gain.setValueAtTime(0,start);gain.gain.linearRampToValueAtTime(volume*.65,start+.008);

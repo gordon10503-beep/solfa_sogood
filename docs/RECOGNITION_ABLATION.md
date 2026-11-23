@@ -31,6 +31,42 @@ All 16 runs exported readable full-page MusicXML. Each cell gives exact pitched 
 
 ## Decision and next experiment
 
-Keep normal scan settings unchanged. The known Leland setting helped the compact fixture. Synthetic quality added zero exact matches in this sample. The fixtures do not establish a speed improvement or generalize to photographed pages, dense SATB with piano, tuplets, multilingual lyrics or other engravers. Poor quality mode is available for an explicit trial and remains unbenchmarked here.
+Keep normal scan settings unchanged. The known Leland setting helped the compact fixture. Synthetic quality added zero exact matches in this sample. The fixtures do not establish a speed improvement or generalize to photographed pages, dense SATB with piano, tuplets, multilingual lyrics or other engravers.
 
 Use Check score → Compare a page scan to request one complete source page and inspect the separate result. The evidence preset abstains on ambiguous fonts or unknown image quality. If baseline page correspondence cannot be established, inspect the exports separately. No system crops are automatically merged. Before any future merge, verify clef, key, meter, part identity, measure order and ties crossing every boundary. The next benchmark should add independently proofread, held-out pages for these failure modes before considering automatic selection or model training.
+
+## Private rehearsal scores
+
+The private benchmark runner checks the PDF hash before scanning. The small vocal references in `benchmarks/choir.py` were read from the printed page. They cover the first staff only and count the two written segments of a tie separately. The PDF, handwriting, lyrics and full private transcriptions stay outside the repository.
+
+~~~sh
+python -m benchmarks.choir "grow for me.pdf"
+python -m benchmarks.choir "grow for me.pdf" --opening-profile Poor
+python -m benchmarks.choir "道別是一件難事_SATB_pinyin.pdf" --opening-profile Leland
+~~~
+
+| Grow for Me | Runtime on local Windows | Bars per part | Verified vocal events in bars 1–4 | Structural findings |
+|---|---:|---:|---:|---|
+| Complete PDF, engine baseline | 118.3 s | 61 | 12/12, zero extra | 12 short, 2 overfull |
+| Full first page, Standard quality | 28.79 s | 12 | 12/12, zero extra | 3 short, 1 overfull |
+| Full first page, Poor quality | 28.99 s | 12 | 12/12, zero extra | 3 short, 1 overfull |
+
+All three runs exported a vocal staff and piano grand staff. The first-page runs shared 215 exact events across the voice and piano. Poor produced two more events outside the verified excerpt. Their correctness is unknown. This trial supplies no reason to enable Poor automatically. The full export expands to 76 playback bars when repeats are followed.
+
+On the middle benchmark, both previously archived exports matched the three sung quarter notes of Part I in bar 3. A separate saved library copy matched one. Its unclosed 15ma instruction and final A♯6 conflict with the printed A♯4. Testing the proposed repair in memory brought that bar to two matches. Its opening C♯4 still needs a manual correction. The review action requires evidence from another staff and the following note. Neither archived middle export nor either advanced export triggered it. This measures a specific repair on a saved copy and does not estimate overall recognition accuracy.
+
+Two fresh scans of the middle score's complete first page both recovered I, II and the piano grand staff, 15 bars in each part, and all three verified vocal events. Standard produced 253 events and four short-bar findings in 94.00 seconds. The Leland trial produced 234 events and seven short-bar findings in 53.72 seconds. The exports shared 233 events, with 20 unique to Standard and one unique to Leland. There was one timed run per setting on a machine also running other workloads. Neither the timing difference nor the unverified disagreements establish a winning profile.
+
+**Repeat check.** Page 2 of Grow for Me starts the first ending at “please” (bar position 14), spans a system break, and ends at 17. Audiveris placed the whole first ending in 17. On an in-memory copy of the full export, extending that ending in Studio preserved the 17 → 2 repeat and changed the second pass from 16 → 18 to the printed 13 → 18. Playback then contained 73 bar positions. The review control requires a user to supply the printed start and rejects changes that would cross another repeat or ending.
+
+**Reader and playback timings.** The local Chrome comparison used commit `01aa477` as the baseline, a fresh server and browser context per case, and alternating version order. The reader fixture used the 679,445-byte middle-score MusicXML with a 1,367,136-byte original PDF. The notation case used the same MusicXML by itself.
+
+| User action | Baseline median | Updated median | Measurement |
+|---|---:|---:|---|
+| Open original PDF | 2,273 ms | 724 ms | Five opens per version, click to first sheet canvas mounted and next animation frame |
+| Open notation alone | 1,372 ms | 1,422 ms | Five opens per version, click to first selectable note mounted and next animation frame |
+| Start playback | 1,531 ms | 185 ms | Three cold starts per version, 80 ms artificial delay per sample request, click to transport entering playback |
+
+In a separate horizontal navigation check, returning from page two to page one recreated the first canvas in 764 ms on the baseline. The updated reader reused the same canvas in 12 ms. This was one observed back turn per version.
+
+The opening sheet uses a bounded PNG raster of the original PDF. PDF.js supplies the fallback and subsequent pages. Playback started after two sample responses in the measured score, down from 37. Until an exact sample finishes decoding, Studio transposes the closest loaded sample from the selected instrument. The notation measurement showed no startup gain. Device audio-output latency, iPad frame rate and hosted database/network latency were outside these tests.
