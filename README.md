@@ -77,7 +77,7 @@ See [production-readiness criteria](docs/PRODUCTION_READINESS.md) for the MuseSc
 
 Open **Check score** to compare the original PDF with the recognized music. Warnings are grouped by bar. Expand **Bar timing by part** and select a bar to see how much of it each part fills. Chords and overlapping voices count once, rests count toward the total, and grace notes use no beats. A duration that fits 3/4 can also be a short bar in 4/4. Use the printed signature to decide.
 
-- In **Check score** or **Compose**, drag a pitched note vertically to change its staff position. The preview shows the target pitch. A drag retains the accidental.
+- In **Check score** or **Compose**, drag a pitched note vertically to change its staff position. The preview shows the target pitch. A drag retains the accidental. In **Check score**, drag a single note or rest sideways to change its length, or select it and press Shift+Left/Right. Undo is available beside the score. Chords, tuplets and tied rhythms need a group edit.
 - To enter an exact pitch, click the note, choose **Change pitch on piano**, then play the on-screen piano or the indicated computer keys.
 - For missing beats in a simple bar, select the preceding note, choose **Insert after on piano**, set the length, then play the missing pitches. Each new note becomes the anchor for the next. Undo restores the previous edit. Linked and multi-voice passages may require MusicXML editing.
 - Scanning now expands contrast on faded raster pages. If an ensemble preset cannot match the detected staves, Studio keeps the automatic grouping and adds a review note. Library cards show when scores were added and updated. Duplicate library titles receive numbered suffixes before the file extension.

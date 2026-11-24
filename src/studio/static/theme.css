@@ -272,3 +272,20 @@ body[data-page=read].notation-horizontal #pages>.score-page{flex:0 0 100%;margin
   #issue-open { flex: 1; }
 }
 @media print { #issue-nav, #rehearsal-workspace { display: none; } }
+
+#review-drag-hint,#review-more-tools {display:none}
+@media screen {
+  body[data-page=review] .inspector {display:none}
+  body[data-page=review].review-inspector-open .inspector {display:block}
+  body[data-page=review] #review-inspector-toggle,body[data-page=review] #review-more-tools {display:inline-flex;align-items:center;justify-content:center}
+  body[data-page=review] #review-drag-hint {display:inline-block;margin-right:auto;font-weight:650;white-space:nowrap}
+  body[data-page=review] #edit-strip {flex-wrap:wrap}
+  body[data-page=review] #edit-strip button {touch-action:manipulation}
+  body[data-page=review] #edit-strip #review-more-tools {font:600 13px system-ui,sans-serif;padding:0 10px}
+  body[data-page=review] #review-more-tools[aria-expanded=false]+#stamp-tools {display:none}
+  body[data-page=review] #stamp-tools {order:1;flex:1 0 100%;max-width:100%;overflow-x:auto}
+  body[data-page=review] #stamp-tools button {touch-action:none;flex:none}
+  body[data-page=review] #pages :is(.note,.rest,.mRest) {touch-action:none;cursor:move}
+  #pages .duration-preview {fill:var(--blue);color:var(--blue)}
+  #drag-pitch {white-space:nowrap}
+}

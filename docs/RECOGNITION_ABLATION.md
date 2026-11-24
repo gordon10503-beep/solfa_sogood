@@ -70,3 +70,37 @@ Two fresh scans of the middle score's complete first page both recovered I, II a
 In a separate horizontal navigation check, returning from page two to page one recreated the first canvas in 764 ms on the baseline. The updated reader reused the same canvas in 12 ms. This was one observed back turn per version.
 
 The opening sheet uses a bounded PNG raster of the original PDF. PDF.js supplies the fallback and subsequent pages. Playback started after two sample responses in the measured score, down from 37. Until an exact sample finishes decoding, Studio transposes the closest loaded sample from the selected instrument. The notation measurement showed no startup gain. Device audio-output latency, iPad frame rate and hosted database/network latency were outside these tests.
+
+## Saved choir scans and independently transcribed passages
+
+On 24 November 2026 we replayed nine full-book jobs against reference events read from the three original PDFs. The originals, reference transcriptions, and derived MusicXML stay in the local data directory. The public synthetic fixtures above remain available on a fresh checkout.
+
+| Edition | Reference coverage | Saved export results |
+|---|---|---|
+| 我們都(可以)是天使 | 108 part-bars on pages 1, 2, 5, 8 and 10 across SATB and piano, including 40 silent part-bars. 630 pitched segments. | Three of four exports had nine parts and could not be matched by printed part order. The five-part saved export matched 137/630 with 199 extra events. |
+| 道別是一件難事 | Both vocal parts, all 82 bars. 642 pitched segments. | Three saved exports matched 621/642 with 21 extras each. One matched 636/642 with six extras. All four missed the same eighth-note/rest rhythm in Part II, bar 15. |
+| Grow for Me | 60 of 61 written vocal bars with 175 pitched segments. Bar 49 awaits rhythm confirmation. | One saved export matched 144/175 with 31 extras. The key-signature review detected isolated changes in bars 25–28 and 37–40. |
+
+Each match requires the same printed part position, bar position, onset, spelled pitch including octave and accidental, and duration. Simultaneous events retain their multiplicities. Scores include only reference part-bars. The report lists part shape, bar lengths, structural checks, missing events, extra events, and exact bars separately. Each written tie segment counts at its own onset. These numbers do not evaluate ties, lyrics, expressive playback or every piano bar. Repeated jobs on one PDF share the same printed evidence.
+
+**Part grouping.** Re-exporting the same three eligible archived books on the same engine produced nine parts in the baseline and five with the guarded SATB alias repair. All 1,055 pitched events per pair survived when compared by canonical part. All five candidate parts still contained 56 bars for 55 in print. Each candidate matched 121/630 with 509 missing and 229 extra by strict printed position. The separate historical five-part export is a different job.
+
+**Courtesy signatures and the extra bar.** The bandscore fork's treatment of narrow page-edge measures prompted a read-only test. For systems containing at least three measures, the replay report records end measures narrower than one quarter of the median of the other measures. It includes Audiveris's special-measure flag and duration. The four advanced books all flagged the ends of the first systems on pages 1, 3 and 5. Pages 1 and 5 were already zero-duration cautionary stacks. On page 3, the print shows bars 12 and 13 followed by a courtesy key and 6/8 meter, then starts the next system at bar 14. The candidate inserted an extra measure in between and assigned it pitched events in bass and piano. Neither middle nor Grow produced any flagged edges. [Bandscore fork and proofreading workflow](https://github.com/hibikiwtnb/audiveris-bandscore/blob/bandscore/README.en.md)
+
+For a diagnostic comparison, omit the fourteenth measure of each candidate part in memory and score the remaining measures in printed order. On all three candidates, matches increased from 121 to 330 of 630, extras fell from 229 to 13, and 47 of the 108 checked part-bars matched exactly. This isolates the effect of a shifted bar index. The experiment makes no change to an uploaded score. An engine repair still needs to preserve the upcoming signatures, notes at the preceding boundary and ties across the break.
+
+**Input ablation.** On the entire first page of the middle score, the usual prepared input matched 138/146 checked vocal segments. The original input matched 134/146 and the prepared 400 DPI input matched 137/146. All three missed the Part II bar 15 rhythm. Studio retains its existing default.
+
+### Reproduce locally
+
+Run these from the repository root with the Studio environment active and the three matching private reference JSON files under `data/benchmark-references`.
+
+```powershell
+python -m benchmarks.reference_score
+python -m benchmarks.replay --inspect-edges
+python -m benchmarks.replay --inspect-edges --export-pairs build/new-paired-exports
+python -m benchmarks.replay --inspect-edges --trials build/new-paired-exports
+python -m benchmarks.replay_page "path/to/middle-score.pdf"
+```
+
+The answer book is written to `data/benchmark-references/answers/index.html`. Its four vocal MusicXML excerpts cover both middle-score parts and Grow on either side of the unconfirmed bar. The replay report is written to `data/benchmark-references/replay.json`. Each job must match the original PDF hash and contain a single export and a book covering all source pages. Paired exports require a new destination and use copies of the archived recognition graphs.

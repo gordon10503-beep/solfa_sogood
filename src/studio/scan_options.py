@@ -40,16 +40,69 @@ def repair_empty_run_tables(path):
     temporary.replace(path)
 
 
-def repair_satb_book(path, layout="satb-piano"):
-    """Only for an explicitly selected five-part SATB + piano layout.
+def _proven_choir_layout(root):
+    """Prove that two sets of part IDs refer to alternating labels on fixed staves."""
+    scores = root.findall("score")
+    if len(scores) != 1 or scores[0].get("logicals-locked") == "true":
+        return None
+    systems = [s.findall("part") for s in root.findall("sheet/page/system")]
+    if not systems or len(systems[0]) not in (4, 5):
+        return None
+    roles = ("Soprano", "Alto", "Tenor", "Bass", "Piano")[:len(systems[0])]
+    logicals = scores[0].findall("logical-part")
+    declared = {p.get("id"): p for p in logicals}
+    if len(logicals) != len(declared) or len(logicals) <= len(roles):
+        return None
+    for row in systems:
+        if len(row) != len(roles) or any(p.get("manual") == "true" for p in row):
+            return None
+    used = set()
+    for index, role in enumerate(roles):
+        physical = [row[index] for row in systems]
+        ids = {p.get("logical-id") for p in physical}
+        if None in ids or ids & used or not ids <= declared.keys():
+            return None
+        used.update(ids)
+        count = 2 if role == "Piano" else 1
+        labels = {role.lower(), "pno" if count == 2 else role[0].lower()}
+        names = set()
+        for id_ in ids:
+            part = declared[id_]
+            # The preset rebuilds the logical list. Preserve custom instruments
+            # and other user-supplied metadata by declining these books.
+            if (set(part.attrib) != {"id", "staff-count", "name"} or part.get("staff-count") != str(count)
+                    or any(child.tag != "staff-configuration" for child in part)):
+                return None
+            name = part.get("name").lower().rstrip(".")
+            if name not in labels or name in names:
+                return None
+            names.add(name)
+            observed = {p.get("name", "").lower().rstrip(".") for p in physical if p.get("logical-id") == id_}
+            if name not in observed or (len(ids) > 1 and observed - labels - {""}):
+                return None
+        if role.lower() not in names:
+            return None
+        for p in [*physical, *(declared[i] for i in ids)]:
+            configs = p.findall("staff-configuration")
+            if len(configs) != count or any(c.attrib != {"line-count": "5"} for c in configs):
+                return None
+    if used == declared.keys():
+        return "satb-piano" if len(roles) == 5 else "satb"
+    return None
 
-    Refuse mismatched systems rather than deleting or guessing voice content.
-    Keep the untouched OMR book for investigation.
-    """
-    names = {"satb-piano": ("Soprano", "Alto", "Tenor", "Bass", "Piano"), "satb": ("Soprano", "Alto", "Tenor", "Bass"), "piano": ("Piano",)}[layout]
-    counts = [2 if name == "Piano" else 1 for name in names]
+
+def repair_satb_book(path, layout="satb-piano"):
+    """Apply the chosen ensemble or a proven alias repair. Keep the original book."""
     with zipfile.ZipFile(path) as source:
+        if layout == "auto" and "book.xml" not in source.namelist():
+            return False
         root = ET.fromstring(source.read("book.xml"))
+        if layout == "auto":
+            layout = _proven_choir_layout(root)
+            if layout is None:
+                return False
+        names = {"satb-piano": ("Soprano", "Alto", "Tenor", "Bass", "Piano"), "satb": ("Soprano", "Alto", "Tenor", "Bass"), "piano": ("Piano",)}[layout]
+        counts = [2 if name == "Piano" else 1 for name in names]
         systems = root.findall("sheet/page/system")
         if not systems or any([len(p.findall("staff-configuration")) for p in s.findall("part")] != counts for s in systems):
             raise ValueError("Selected ensemble does not match the detected staves in every system. Retry Automatic, or correct staff grouping in Audiveris.")
@@ -72,3 +125,4 @@ def repair_satb_book(path, layout="satb-piano"):
                 output.writestr(entry, ET.tostring(root, encoding="utf-8", xml_declaration=True) if entry.filename == "book.xml" else source.read(entry.filename))
     shutil.copy2(path, path.with_suffix(".original.omr"))
     temporary.replace(path)
+    return True

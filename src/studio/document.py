@@ -240,9 +240,58 @@ def inspect(root, mode="movable", minor_do=False):
     for pi, mi, _, _, pitch, octave in octave_repairs(root):
         issues.append({"code": "unclosed-15ma", "part": pi, "measure": mi,
                        "message": f"Unclosed two-octave mark. A matching staff and the next note suggest octave {octave} for {pitch.findtext('step')}. Compare the PDF before applying."})
+    issues.extend(isolated_system_keys(root, parts))
     return {"title": root.findtext("work/work-title") or root.findtext("movement-title") or "Untitled score",
             "composer": root.findtext("identification/creator", ""), "parts": parts, "notes": notes, "issues": issues,
             "shortFirstEndings": [bar for bar, _ in single_bar_first_endings(root)]}
+
+
+def isolated_system_keys(root, parts):
+    """Find one system where a scan's previously shared written key diverges."""
+    if len(parts) < 2 or not any((s.text or "").startswith("Audiveris ") for s in root.iter("software")):
+        return
+    xml_parts = [part.findall("measure") for part in root.findall("part")]
+    numbers = [m.get("number") for m in xml_parts[0]]
+    if not numbers or any([m.get("number") for m in bars] != numbers for bars in xml_parts):
+        return
+    if (root.find(".//transpose") is not None
+            or any(bars[0].find("attributes/key/fifths") is None for bars in xml_parts)
+            or any(k.get("number") or k.find("fifths") is None for k in root.iter("key"))):
+        return
+    breaks = [i for i, bar in enumerate(xml_parts[0]) if any(
+        tag.get("new-page") == "yes" or tag.get("new-system") == "yes" for tag in bar.findall("print"))]
+    tracks = [[m["fifths"] for m in p["measures"]] for p in parts]
+
+    def signature(fifths):
+        if not fifths:
+            return "no sharps or flats"
+        return f"{abs(fifths)} {'sharp' if fifths > 0 else 'flat'}{'s' if abs(fifths) != 1 else ''}"
+
+    def has_opening_key(bar):
+        for node in bar:
+            if node.tag in ("note", "forward", "backup"):
+                break
+            if node.tag == "attributes" and node.find("key/fifths") is not None:
+                return True
+        return False
+
+    for start, end in zip(breaks, breaks[1:]):
+        if start == 0:
+            continue
+        shared = tracks[0][start-1]
+        if any(keys[start-1] != shared or keys[end] != shared for keys in tracks):
+            continue
+        changed = [p for p, keys in enumerate(tracks) if keys[start] != shared]
+        if len(changed) != 1 or any(any(k != keys[start] for k in keys[start:end]) for keys in tracks):
+            continue
+        part = changed[0]
+        # Require actual exported key marks at both ends of the suspect passage.
+        if not all(has_opening_key(xml_parts[part][i]) for i in (start, end)):
+            continue
+        yield {"code": "isolated-system-key", "part": part, "measure": start, "endMeasure": end-1,
+               "message": f"Check the printed key signature in bars {start+1}–{end}. "
+                          f"This part reads {signature(tracks[part][start])}. The other parts retain "
+                          f"{signature(shared)}, and the keys agree again in bar {end+1}."}
 
 
 def single_bar_first_endings(root):

@@ -71,6 +71,8 @@ async function openScore(id, preserve=false, initialView="read") {
   }
   pause();state.scrollStart=null;$("scroll-only").textContent="▷ Scroll without sound";
   const oldPosition=preserve?state.position:0, oldScroll=preserve?$("score-scroll").scrollTop:0;
+  const reviewOffsets=preserve&&state.view==="review"
+    ? [$("pdf-reader"),$("digital-reader")].map(el=>[el,el.scrollTop]) : [];
   ensureNotation=null;
   state.mountIssuePage=null;
   busy(true,"Opening score…");
@@ -182,8 +184,9 @@ async function openScore(id, preserve=false, initialView="read") {
         if(n.pitched){
           const title=document.createElementNS("http://www.w3.org/2000/svg","title");
           title.textContent=pitch;
-          note.prepend(title);bindPitchDrag(note,n);
+          note.prepend(title);
         }
+        if(n.pitched||n.rest)bindNoteDrag(note,n);
         note.addEventListener("click",()=>{setKeyboardNote(note);selectNote(note.id);});
       });
     }
@@ -197,6 +200,14 @@ async function openScore(id, preserve=false, initialView="read") {
       if(!["ArrowLeft","ArrowRight"].includes(e.key))return;
       e.preventDefault();
       const step=e.key==="ArrowLeft"?-1:1;
+      if(e.shiftKey && state.view==="review"){
+        const length=nextLength(result.notes[note.id].duration,step);
+        if(length&&!e.repeat)run(async()=>{
+          await edit("resize-note",{nid:note.id,unit:length.unit,dotted:length.dotted});
+          $(note.id)?.focus({preventScroll:true});
+        })();
+        return;
+      }
       let page=pageContainers.indexOf(note.closest(".score-page"));
       const items=[...pageContainers[page].querySelectorAll('[role="button"]')];
       let next=items[items.indexOf(note)+step];
@@ -238,6 +249,9 @@ async function openScore(id, preserve=false, initialView="read") {
   if(!result.deferredNotation)mountNotation();
   $("score-scroll").scrollTop=oldScroll;
   await opening;
+  if(generation===state.openGeneration && state.view==="review"){
+    for(const [el,top] of reviewOffsets){el.scrollTop=top;comparisonOffsets.set(el,el.scrollTop);}
+  }
 }
 const noteEditorHome=$("note-details").nextElementSibling;
 function setView(view, refresh=true) {
@@ -263,23 +277,49 @@ function setView(view, refresh=true) {
   ["read","compose","review"].forEach(v=>$(v+"-panel").hidden=(v==="read" ? view!=="practice" : v!==view));
   if(changed && refresh)run(readerFormat)();
 }
-function bindPitchDrag(note, n) {
+const dragLengths=["64th","32nd","16th","eighth","quarter","half","whole"].flatMap((unit,index)=>
+  [false,true].map(dotted=>({unit,dotted,beats:2**(index-4)*(dotted?1.5:1)})));
+function nextLength(duration,steps){
+  if(!steps)return null;
+  const index=steps>0?dragLengths.findIndex(x=>x.beats>duration+1e-5):dragLengths.findLastIndex(x=>x.beats<duration-1e-5);
+  if(index<0)return null;
+  return dragLengths[Math.max(0,Math.min(dragLengths.length-1,index+steps-Math.sign(steps)))];
+}
+function bindNoteDrag(note, n) {
   let drag;
+  // Some touch browsers start viewport panning on an SVG graphics element
+  // despite touch-action on its group. Reserve only touches starting on a glyph.
+  note.addEventListener("touchstart", event=>{
+    if(drag && event.touches.length===1 && event.cancelable)event.preventDefault();
+  },{passive:false});
   const steps = "CDEFGAB";
   note.addEventListener("pointerdown", event => {
-    if (event.button !== 0 || !["review","compose"].includes(state.view)) return;
+    if (event.button !== 0 || !event.isPrimary || !["review","compose"].includes(state.view) || (!n.pitched && state.view!=="review")) return;
     const staff = note.closest(".staff");
     const lines = staff ? [...staff.querySelectorAll(":scope > path")].map(path => path.getBoundingClientRect()).filter(box => box.width > 20 && box.height < 2) : [];
     const halfSpace = lines.length >= 2 ? Math.abs(lines[1].top - lines[0].top)/2 : 0;
     if (!halfSpace) return;
-    drag = {start:event.clientY, halfSpace, pointer:event.pointerId};
+    drag = {start:event.clientY, x:event.clientX, halfSpace, pointer:event.pointerId};
     note.setPointerCapture(event.pointerId);
   });
   note.addEventListener("pointermove", event => {
     if (!drag || event.pointerId !== drag.pointer) return;
     const delta = drag.start-event.clientY;
-    if (!drag.moved && Math.abs(delta) < 5) return;
+    const dx=event.clientX-drag.x;
+    if(!drag.axis){
+      if(Math.max(Math.abs(dx),Math.abs(delta))<6)return;
+      drag.axis=state.view==="review" && Math.abs(dx)>Math.abs(delta)?"length":"pitch";
+    }
+    if(drag.axis==="pitch"&&!n.pitched)return;
     drag.moved = true;
+    const label=$("drag-pitch");
+    label.hidden=false;label.style.left=event.clientX+"px";label.style.top=event.clientY+"px";
+    if(drag.axis==="length"){
+      drag.length=nextLength(n.duration,Math.round(dx/22));
+      label.textContent=drag.length?(drag.length.dotted?"Dotted ":"")+drag.length.unit+" "+(n.rest?"rest":"note"):n.duration+" quarter beats";
+      note.classList.toggle("duration-preview",!!drag.length);
+      return;
+    }
     const pitch = Math.min(62, Math.max(0, 7*n.octave+steps.indexOf(n.step)+Math.round(delta/drag.halfSpace)));
     drag.step = steps[pitch%7]; drag.octave = Math.floor(pitch/7);
     const scale=note.getScreenCTM()?.d;
@@ -287,18 +327,30 @@ function bindPitchDrag(note, n) {
       if(drag.original===undefined)drag.original=note.getAttribute("transform")||"";
       note.setAttribute("transform",drag.original+" translate(0 "+(-(pitch-(7*n.octave+steps.indexOf(n.step)))*drag.halfSpace/scale)+")");
     }
-    const label = $("drag-pitch");
     label.textContent = drag.step + ({"-2":"𝄫","-1":"♭","1":"♯","2":"𝄪"}[n.alter] || "") + drag.octave;
     label.hidden = false; label.style.left = event.clientX+"px"; label.style.top = event.clientY+"px";
   });
-  note.addEventListener("pointercancel", () => {if(drag?.original!==undefined)note.setAttribute("transform",drag.original);drag=null; $("drag-pitch").hidden=true;});
+  function cancelDrag(){
+    if(drag?.original!==undefined)note.setAttribute("transform",drag.original);
+    note.classList.remove("duration-preview");drag=null;$("drag-pitch").hidden=true;
+  }
+  note.addEventListener("pointercancel",cancelDrag);
+  note.addEventListener("lostpointercapture",()=>{if(drag)cancelDrag();});
   note.addEventListener("pointerup", run(async event => {
     if (!drag || event.pointerId !== drag.pointer) return;
     const target = drag;
-    if(drag.original!==undefined)note.setAttribute("transform",drag.original);
-    drag = null; $("drag-pitch").hidden=true;
-    if (!target.moved || (target.step===n.step && target.octave===n.octave)) return;
-    await edit("note", {nid:n.id, step:target.step, octave:target.octave, alter:n.alter});
+    cancelDrag();
+    if(!target.moved){
+      if(event.pointerType==="touch")selectNote(n.id);
+      return;
+    }
+    if(target.axis==="length"){
+      if(!target.length)return;
+      await edit("resize-note",{nid:n.id,unit:target.length.unit,dotted:target.length.dotted});
+    }else{
+      if(target.step===n.step && target.octave===n.octave)return;
+      await edit("note", {nid:n.id, step:target.step, octave:target.octave, alter:n.alter});
+    }
     if(["review","compose"].includes(state.view))selectNote(n.id);
   }));
 }
@@ -308,7 +360,7 @@ function selectNote(id) {
   document.querySelectorAll(".selected-note").forEach(el=>el.classList.remove("selected-note"));
   document.querySelectorAll("[data-symbol]").forEach(b=>b.disabled=!n.pitched && b.dataset.symbol!=="fermata");
   $(id)?.classList.add("selected-note");state.selected=id;state.currentMeasure=n.measure;
-  $("note-details").open=true;
+  if(state.view!=="review")$("note-details").open=true;
   $("repitch-key").disabled=!n.pitched;
   $("insert-key").disabled=false;
   $("note-step").value=n.step;$("note-alter").value=n.alter;$("note-octave").value=n.octave;$("note-lyric").value=n.lyric;
@@ -562,6 +614,11 @@ on("issue-correct","click",()=>{
 on("review-inspector-toggle","click",()=>{
   const open=document.body.classList.toggle("review-inspector-open");
   $("review-inspector-toggle").setAttribute("aria-expanded",String(open));
+});
+on("review-more-tools","click",()=>{
+  const open=$("review-more-tools").getAttribute("aria-expanded")!=="true";
+  $("review-more-tools").setAttribute("aria-expanded",String(open));
+  if(!open)chooseStamp(null);
 });
 document.addEventListener("keydown",event=>{
   if(state.view==="review" && event.altKey && !event.ctrlKey && !event.metaKey && event.key.toLowerCase()==="i" && !document.querySelector("dialog[open]")){
