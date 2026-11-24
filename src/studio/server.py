@@ -40,6 +40,7 @@ from .pdf_meter import recover_opening_meter, recover_opening_tempo
 from .pdf_resolution import dense_score_dpi
 from .recognition_profile import recognition_flags, experiment_flags, page_evidence
 from .playback import build_playback
+from .courtesy import remove_confirmed
 from .rhythm_edit import resize_note
 from .scan_compare import compare, describe
 from .scan_options import selected_pages, repair_satb_book, repair_empty_run_tables
@@ -569,6 +570,15 @@ class Handler(BaseHTTPRequestHandler):
                 if action == "note": data = edit_note(row["xml"], **payload["values"])
                 elif action == "resize-note": data = resize_note(row["xml"], **payload["values"])
                 elif action == "repair-octave": data = repair_octave(row["xml"], **payload["values"])
+                elif action == "remove-courtesy-bar":
+                    measure = payload["values"]["measure"]
+                    root = read_xml(row["xml"])
+                    remove_confirmed(root, measure)
+                    data = xml_bytes(root)
+                    # Bookmarks on the false bar now point to the next printed bar.
+                    metadata = {"bookmarks": [
+                        {**b, "measure": b["measure"] - 1} if b["measure"] > measure else b
+                        for b in row["meta"].get("bookmarks", [])]}
                 elif action == "extend-first-ending": data = extend_first_ending(row["xml"], **payload["values"])
                 elif action == "place": data = place_note(row["xml"], **payload["values"])
                 elif action == "insert-note": data = insert_after_note(row["xml"], **payload["values"])

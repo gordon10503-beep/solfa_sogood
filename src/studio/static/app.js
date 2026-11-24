@@ -556,7 +556,7 @@ function updateIssueNav(){
   $("issue-next").disabled=i+1>=issues.length;
   $("issue-open").setAttribute("aria-expanded",String(!$("issue-detail").hidden));
   $("issue-message").textContent=issue?.message||"Compare the recognized notation with your original.";
-  $("issue-correct").textContent=issue?.code==="missing-meter"?"Correct meter":issue?.measure!=null?"Edit bar":"Review details";
+  $("issue-correct").textContent=issue?.code==="courtesy-bar"?"Remove extra bar":issue?.code==="missing-meter"?"Correct meter":issue?.measure!=null?"Edit bar":"Review details";
 }
 async function openIssue(index){
   const score=state.score;
@@ -596,8 +596,13 @@ on("issue-open","click",()=>{
   if($("issue-detail").hidden)return openIssue(state.issueIndex);
   $("issue-detail").hidden=true;updateIssueNav();
 });
-on("issue-correct","click",()=>{
+on("issue-correct","click",async()=>{
   const issue=state.score.issues[state.issueIndex];
+  if(issue?.code==="courtesy-bar"){
+    if(confirm(issue.message+"\n\nRemove this bar from all parts? You can undo this edit."))
+      await edit("remove-courtesy-bar",{measure:issue.measure});
+    return;
+  }
   document.body.classList.add("review-inspector-open");
   $("review-inspector-toggle").setAttribute("aria-expanded","true");
   let field=$("review-panel");

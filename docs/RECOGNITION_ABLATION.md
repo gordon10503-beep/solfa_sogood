@@ -104,3 +104,9 @@ python -m benchmarks.replay_page "path/to/middle-score.pdf"
 ```
 
 The answer book is written to `data/benchmark-references/answers/index.html`. Its four vocal MusicXML excerpts cover both middle-score parts and Grow on either side of the unconfirmed bar. The replay report is written to `data/benchmark-references/replay.json`. Each job must match the original PDF hash and contain a single export and a book covering all source pages. Paired exports require a new destination and use copies of the archived recognition graphs.
+
+### Confirmed courtesy-signature repair
+
+Check score now offers the repair on aligned, sequentially numbered Audiveris exports with evidence on every part. A narrow measure carries the same key across the parts, follows a double bar, and precedes an explicit system break and meter. Most parts are silent. Each remaining part may contain at most one unmarked pitch. The singer sees the affected parts and confirms against the PDF. A repeat at the boundary, a conflicting key, lyrics, ties or grouped notes in the proposed removal disqualify it.
+
+Reproduce the trial with `python -m benchmarks.replay --trials build/new-paired-exports --courtesy-trial`. Each proposal is tried independently in memory. In all three five-part re-exports, the only proposal removed the false scanned bar 14, which contained a G♯3 in bass and F♯4 in piano. All parts then contained 55 bars. The key of four sharps and the 6/8 meter applied at the start of printed bar 14. Across the 108 checked part-bars, exact pitched segments rose from 121/630 to 330/630 with 13 extras and 300 missing. Existing tie markings were preserved. None of the nine historical exports triggered the rule. This includes the four middle and one Grow exports. A browser test on a private copy verified cancel, confirm, the shifted bookmark, and undo.

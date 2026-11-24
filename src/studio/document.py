@@ -18,6 +18,7 @@ from defusedxml.ElementTree import fromstring
 from src.core.score_model import KeySignature, Note
 from src.core.solfege import annotate_note
 from .playback import build_playback
+from .courtesy import candidates as courtesy_candidates
 
 MAX_BYTES = 40 * 1024 * 1024
 RENDER_LOCK = threading.Lock()
@@ -241,6 +242,15 @@ def inspect(root, mode="movable", minor_do=False):
         issues.append({"code": "unclosed-15ma", "part": pi, "measure": mi,
                        "message": f"Unclosed two-octave mark. A matching staff and the next note suggest octave {octave} for {pitch.findtext('step')}. Compare the PDF before applying."})
     issues.extend(isolated_system_keys(root, parts))
+    for mi, affected in courtesy_candidates(root):
+        names = ", ".join(parts[pi]["name"] for pi in affected)
+        count = len(affected)
+        detail = (f"Removing it discards {count} recognized {'note' if count == 1 else 'notes'} in {names}."
+                  if affected else "It contains no recognized notes.")
+        issues.insert(0, {"code": "courtesy-bar", "part": affected[0] if affected else 0, "measure": mi,
+                          "message": f"Check the end of the system after bar {mi}. If the PDF shows only "
+                                     f"the upcoming signature here, scanned bar {mi+1} is extra. {detail} "
+                                     "The following bar keeps the new key and meter."})
     return {"title": root.findtext("work/work-title") or root.findtext("movement-title") or "Untitled score",
             "composer": root.findtext("identification/creator", ""), "parts": parts, "notes": notes, "issues": issues,
             "shortFirstEndings": [bar for bar, _ in single_bar_first_endings(root)]}

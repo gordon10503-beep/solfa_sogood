@@ -14,6 +14,8 @@ from zipfile import ZipFile
 
 from benchmarks.choir import CASES
 from src.studio.scan_compare import describe, structural_checks
+from src.studio.courtesy import candidates as courtesy_candidates, remove_confirmed
+from src.studio.document import read_xml, xml_bytes
 
 
 def note_key(onset, pitch, duration):
@@ -104,7 +106,7 @@ def narrow_system_edges(sheet, page):
     return findings
 
 
-def replay(scans, references, trials=None, inspect_edges=False):
+def replay(scans, references, trials=None, inspect_edges=False, courtesy_trial=False):
     report = {"runs": [], "repeatedDifferences": [], "unmatchedJobs": []}
     recurrence = defaultdict(list)
     for job in sorted(p for p in scans.iterdir() if p.is_dir()):
@@ -156,6 +158,15 @@ def replay(scans, references, trials=None, inspect_edges=False):
                 continue
             run[stage] = result
             result["exportSha256"] = hashlib.sha256(data).hexdigest()
+            if courtesy_trial:
+                root = read_xml(data)
+                result["courtesyTrials"] = []
+                for index, affected in courtesy_candidates(root):
+                    candidate = read_xml(data)
+                    remove_confirmed(candidate, index)
+                    scored, _ = assess(xml_bytes(candidate), ref, bars)
+                    result["courtesyTrials"].append({"bar": index + 1, "partsWithNotes": affected,
+                                                     "after": scored})
             if stage == "saved":
                 for (part, bar), (lost, added, absent) in differences.items():
                     if absent:
@@ -207,6 +218,7 @@ def main():
     parser.add_argument("--scans", type=Path, default=Path("data/scans"))
     parser.add_argument("--references", type=Path, default=Path("data/benchmark-references"))
     parser.add_argument("--inspect-edges", action="store_true", help="Report unusually narrow system-edge measures for PDF review")
+    parser.add_argument("--courtesy-trial", action="store_true", help="Score each proposed courtesy-bar repair independently in memory")
     experiment = parser.add_mutually_exclusive_group()
     experiment.add_argument("--trials", type=Path, help="Existing paired exports in JOB/{baseline,candidate}/score.mxl")
     experiment.add_argument("--export-pairs", type=Path, help="Re-export eligible books to a new directory")
@@ -214,7 +226,7 @@ def main():
     args = parser.parse_args()
     if args.export_pairs:
         export_pairs(args.scans, args.export_pairs)
-    report = replay(args.scans, args.references, args.trials or args.export_pairs, args.inspect_edges)
+    report = replay(args.scans, args.references, args.trials or args.export_pairs, args.inspect_edges, args.courtesy_trial)
     args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     for run in report["runs"]:
         print(run["case"], run["job"][:8], run["status"], (run.get("saved") or {}).get("noteComparison"))
